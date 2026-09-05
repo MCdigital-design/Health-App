@@ -484,7 +484,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('About', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('Verity Dashboard v1.2.1'),
+                  const Text('Verity Dashboard v1.2.2'),
                   const Text('Offline-first Polar Verity Sense client'),
                 ],
               ),

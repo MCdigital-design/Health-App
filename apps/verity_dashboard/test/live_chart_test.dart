@@ -83,4 +83,35 @@ void main() {
     expect(axisish, findsOneWidget);
     expect(find.text('last 10m'), findsOneWidget);
   });
+
+  testWidgets('Live chart chip is an even number; long floats stay off the chart', (tester) async {
+    tester.view.physicalSize = const Size(1080, 1920);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData.dark(),
+        home: Scaffold(
+          body: LiveChart(
+            spots: const [
+              FlSpot(-600, 104),
+              FlSpot(0, 158.93333333333334),
+            ],
+            title: 'Heart Rate',
+            unit: 'bpm',
+            color: Colors.redAccent,
+            timeframe: ChartTimeframe.s30,
+            yRange: const ChartAxisRange(min: 100, max: 180, interval: 20),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('159 bpm'), findsOneWidget);
+    expect(find.text('158.93333333333334'), findsNothing);
+    expect(find.textContaining('158.93333333333334'), findsNothing);
+  });
 }

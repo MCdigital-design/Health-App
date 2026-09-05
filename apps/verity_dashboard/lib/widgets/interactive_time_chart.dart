@@ -168,8 +168,8 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
                     ),
                     child: Text(
                       widget.unit == null
-                          ? formatExactValue(last)
-                          : '${formatExactValue(last)} ${widget.unit}',
+                          ? formatLeanValue(last)
+                          : '${formatLeanValue(last)} ${widget.unit}',
                       style: TextStyle(
                         color: widget.color,
                         fontSize: 12,
@@ -269,12 +269,27 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
                           ),
                           lineTouchData: LineTouchData(
                             enabled: true,
+                            handleBuiltInTouches: true,
                             touchTooltipData: LineTouchTooltipData(
+                              maxContentWidth: 220,
+                              fitInsideHorizontally: true,
+                              fitInsideVertically: true,
+                              tooltipRoundedRadius: 8,
+                              getTooltipColor: (_) =>
+                                  widget.color.withValues(alpha: 0.92),
                               getTooltipItems: (touched) => [
                                 for (final t in touched)
                                   LineTooltipItem(
-                                    '${formatElapsed(t.x)}  ${formatExactValue(t.y)}${widget.unit != null ? ' ${widget.unit}' : ''}',
-                                    const TextStyle(fontSize: 12, color: Colors.white),
+                                    formatTouchTooltip(
+                                      y: t.y,
+                                      unit: widget.unit,
+                                      when: formatElapsed(t.x),
+                                    ),
+                                    const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
                                   ),
                               ],
                             ),

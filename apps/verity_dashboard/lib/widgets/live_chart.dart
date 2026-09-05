@@ -54,7 +54,7 @@ class LiveChart extends StatelessWidget {
                       ),
                     ),
                     if (last != null) ...[
-                      _ExactValueChip(value: last, unit: unit, color: color),
+                      _LeanValueChip(value: last, unit: unit, color: color),
                       const SizedBox(width: 8),
                     ],
                     Text(
@@ -134,6 +134,33 @@ class LiveChart extends StatelessWidget {
                               ),
                             ),
                             borderData: FlBorderData(show: false),
+                            lineTouchData: LineTouchData(
+                              enabled: true,
+                              handleBuiltInTouches: true,
+                              touchTooltipData: LineTouchTooltipData(
+                                maxContentWidth: 220,
+                                fitInsideHorizontally: true,
+                                fitInsideVertically: true,
+                                tooltipRoundedRadius: 8,
+                                getTooltipColor: (_) =>
+                                    color.withValues(alpha: 0.92),
+                                getTooltipItems: (touched) => [
+                                  for (final t in touched)
+                                    LineTooltipItem(
+                                      formatTouchTooltip(
+                                        y: t.y,
+                                        unit: unit,
+                                        when: formatLiveAgo(t.x),
+                                      ),
+                                      const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
                             lineBarsData: [
                               LineChartBarData(
                                 spots: spots,
@@ -165,12 +192,12 @@ bool _onTick(double value, double interval) {
   return (value - n * interval).abs() < interval * 0.02 + 1e-6;
 }
 
-class _ExactValueChip extends StatelessWidget {
+class _LeanValueChip extends StatelessWidget {
   final double value;
   final String? unit;
   final Color color;
 
-  const _ExactValueChip({
+  const _LeanValueChip({
     required this.value,
     required this.color,
     this.unit,
@@ -179,8 +206,8 @@ class _ExactValueChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = unit == null || unit!.isEmpty
-        ? formatExactValue(value)
-        : '${formatExactValue(value)} $unit';
+        ? formatLeanValue(value)
+        : '${formatLeanValue(value)} $unit';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(

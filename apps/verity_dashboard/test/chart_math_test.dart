@@ -94,6 +94,20 @@ void main() {
       expect(formatExactValue(125.4), '125.4');
     });
 
+    test('chart display is even; blue box keeps the captured fraction', () {
+      const hrAvg = 158.93333333333334;
+      const ppgAvg = 330032.4891472868;
+      expect(formatLeanValue(hrAvg), '159');
+      expect(formatLeanValue(ppgAvg), '330032');
+      expect(formatCapturedValue(hrAvg), '158.933');
+      expect(formatCapturedValue(ppgAvg), '330032.489');
+      expect(formatTouchTooltip(y: hrAvg, unit: 'bpm', when: '-3m'), '159 bpm\n158.933\n-3m');
+      expect(formatTouchTooltip(y: ppgAvg, when: '-2m'), '330032\n330032.489\n-2m');
+      expect(formatLeanValue(hrAvg).contains('.'), isFalse);
+      expect(formatTouchTooltip(y: hrAvg).contains('158.93333333333334'), isFalse);
+      expect(formatTouchTooltip(y: ppgAvg).contains('330032.4891472868'), isFalse);
+    });
+
     test('formatLiveAgo uses now / minutes, not -600s', () {
       expect(formatLiveAgo(0), 'now');
       expect(formatLiveAgo(-30), '-30s');

@@ -165,14 +165,52 @@ String formatAxisTick(double value) {
   return value.round().toString();
 }
 
-/// Full-precision readout for the last sample (the "blue box"), not the axis.
-String formatExactValue(double value) {
+/// Whole number for anything drawn on the chart (chip, primary tooltip line).
+/// Keeps full digits (`330032`, `159`) — compact `k`/`M` is only for axis ticks.
+String formatLeanValue(double value) {
   if (!value.isFinite) return '--';
-  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
-  if (value.abs() >= 100) return value.toStringAsFixed(1);
-  if (value.abs() >= 10) return value.toStringAsFixed(2);
-  return value.toStringAsFixed(3);
+  return value.round().toString();
 }
+
+/// Captured value without IEEE leftovers (`158.93333333333334` → `158.933`).
+/// SQLite still stores the raw sample; this is only what the blue box shows.
+String formatCapturedValue(double value) {
+  if (!value.isFinite) return '--';
+  if ((value - value.roundToDouble()).abs() < 1e-6) {
+    return value.round().toString();
+  }
+  final places = value.abs() >= 1000
+      ? 3
+      : value.abs() >= 100
+          ? 3
+          : value.abs() >= 10
+              ? 3
+              : 4;
+  var raw = value.toStringAsFixed(places);
+  if (raw.contains('.')) {
+    raw = raw.replaceFirst(RegExp(r'0+$'), '');
+    if (raw.endsWith('.')) raw = raw.substring(0, raw.length - 1);
+  }
+  return raw;
+}
+
+/// Blue-box text: lean integer first, full captured value underneath if it differs.
+String formatTouchTooltip({
+  required double y,
+  String? unit,
+  String? when,
+}) {
+  final lean = formatLeanValue(y);
+  final captured = formatCapturedValue(y);
+  final leanLine = unit == null || unit.isEmpty ? lean : '$lean $unit';
+  final lines = <String>[leanLine];
+  if (captured != lean) lines.add(captured);
+  if (when != null && when.isNotEmpty) lines.add(when);
+  return lines.join('\n');
+}
+
+/// Full-precision readout for the last sample (the "blue box"), not the axis.
+String formatExactValue(double value) => formatCapturedValue(value);
 
 /// Compact single-line number for axis labels. Avoids the fl_chart default
 /// that wrapped `329.7K` into `329.` + `7K` on a too-narrow Y axis.
