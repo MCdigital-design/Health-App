@@ -325,11 +325,13 @@ row is still pending).
 
 | Check | Result |
 |---|---|
-| `flutter analyze` | Pending this run |
-| `flutter test --concurrency=1 --timeout 30s` | Pending this run |
-| Release APK zip-aligned + signed | Pending this run |
-| `aapt dump badging` | Pending this run |
-| BLE permissions in merged manifest | SCAN / CONNECT / legacy BLUETOOTH |
+| `flutter analyze` | Clean (0 issues) |
+| `flutter test --concurrency=1 --timeout 30s` | **43/43 passed** (includes 3 new orphan-session tests) |
+| Release APK zip-aligned + signed | OK. v2+v3. Same cert as v1.2.3 (`ddf50be77a5c…ddb3c6`, expires 2054) |
+| `aapt dump badging` | `com.example.verity_dashboard` **1.2.4 (11)**, minSdk 26, targetSdk 36 |
+| BLE permissions in merged manifest | SCAN / CONNECT / legacy BLUETOOTH (+ location maxSdk 30) |
+| Backup | `allowBackup=false`, `@xml/backup_rules`, `@xml/data_extraction_rules` |
+| SHA256 | `c836f035b71558b3cd5cd8c1e5aae17878fac7412e34de7654f9d9ff689bf4a3` |
 
 ### Blockers found on this pass and fixed in v1.2.4
 
