@@ -20,6 +20,9 @@ class LocalDb {
   static final LocalDb instance = LocalDb._internal();
   static Database? _db;
 
+  /// Override in tests so parallel test isolates do not lock one file.
+  static String databaseFileName = 'verity_dashboard.db';
+
   /// Bump when the schema changes. Migrations run in [_onUpgrade] so
   /// existing installs keep their data — sessions/samples are stored in the
   /// app's private SQLite database, which survives app restarts and
@@ -37,7 +40,7 @@ class LocalDb {
 
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'verity_dashboard.db');
+    final path = join(dbPath, databaseFileName);
     return openDatabase(
       path,
       version: _schemaVersion,

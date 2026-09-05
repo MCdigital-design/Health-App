@@ -11,6 +11,7 @@ void main() {
   setUpAll(() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
+    LocalDb.databaseFileName = 'verity_local_db_test.db';
   });
 
   group('LocalDb', () {

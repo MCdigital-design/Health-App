@@ -12,9 +12,19 @@ installed a version, just install this one on top - no need to uninstall.
 4. If Play Protect warns: More details -> Install anyway.
 
 Requires Android 8.0 or newer. Release-signed (not debug/testOnly).
-SHA256: 3553f8ead2deceb61bf5f1d6a0d231fef432872f071987e850e700a210c27092
+SHA256: f44714edfe117c16bf0793872d90316bcc4083edac8c77af81f200b6d4f914b3
 
-WHAT'S NEW IN THIS BUILD (fixes a 12-minute-recording-with-zero-HR bug):
+WHAT'S NEW IN THIS BUILD (v1.2.0 — session charts, motion, storage):
+
+- Session Heart Rate no longer shows "No data" when HR rows exist (was
+  hidden behind the first 5,000 PPG rows).
+- Session charts use elapsed time on X, compact Y labels, pinch/drag zoom.
+- Accelerometer starts on new recordings by default.
+- Storage / Polar / GitHub privacy copy, plus delete-all in Settings.
+
+Previous build's fixes are still included (SDK Mode, HR retry, etc).
+
+WHAT'S NEW IN THE PREVIOUS BUILD (fixes a 12-minute-recording-with-zero-HR bug):
 
 - Fixed a real root cause: toggling SDK Mode while a stream (e.g. PPG)
   was already running caused the sensor to silently reject the mode

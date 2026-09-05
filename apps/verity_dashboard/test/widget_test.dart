@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:verity_dashboard/main.dart';
+import 'package:verity_dashboard/storage/local_db.dart';
 
 void main() {
   setUpAll(() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
+    LocalDb.databaseFileName = 'verity_widget_test.db';
   });
 
   testWidgets('App shell renders bottom navigation', (WidgetTester tester) async {
