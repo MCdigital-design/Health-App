@@ -8,7 +8,7 @@ This app lives in [Health-App](https://github.com/MCdigital-design/Health-App). 
 
 Use this file only:
 
-- [`dist/verity-dashboard.apk`](../../dist/verity-dashboard.apk) (29 MB, SHA256 `912b2334d83bed7c96c6886ec235fc5d88bcf2137d8662b105c3f92a6edb3c3f`)
+- [`dist/verity-dashboard.apk`](../../dist/verity-dashboard.apk) (29 MB, SHA256 `af7cb9fea9ef9bcaff5c67c746d923f50bd0fc1f2e65c85ccb127843201bbcc6`)
 - Direct: https://github.com/MCdigital-design/Health-App/raw/main/dist/verity-dashboard.apk
 
 This build is signed with the same key as before, so it installs as an **update** over a previous install — no need to uninstall first.

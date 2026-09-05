@@ -12,9 +12,16 @@ installed a version, just install this one on top - no need to uninstall.
 4. If Play Protect warns: More details -> Install anyway.
 
 Requires Android 8.0 or newer. Release-signed (not debug/testOnly).
-SHA256: 912b2334d83bed7c96c6886ec235fc5d88bcf2137d8662b105c3f92a6edb3c3f
+SHA256: af7cb9fea9ef9bcaff5c67c746d923f50bd0fc1f2e65c85ccb127843201bbcc6
 
-WHAT'S NEW IN THIS BUILD (v1.2.5 — size explainer, collapsible copy, ChatGPT):
+WHAT'S NEW IN THIS BUILD (v1.2.6 — ChatGPT chat after device login):
+
+- Device verify already worked. Chat was HTTP 400 because the request
+  used a system message, extra fields, and gpt-4o. It now matches the
+  ChatGPT Codex body (gpt-5.4, instructions + user input only).
+- You can stay signed in. Install this update and send "hi" again.
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.5 — size explainer, collapsible copy, ChatGPT):
 
 - A 25-minute HR-only take is supposed to be ~28 KB. A 16-minute take
   with PPG is ~1.7 MB. Nothing is compressed — PPG is ~40 rows/second.
