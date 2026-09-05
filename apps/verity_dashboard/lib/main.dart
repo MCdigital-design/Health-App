@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'polar/polar_repository.dart';
@@ -7,6 +9,14 @@ import 'screens/dashboard_screen.dart';
 import 'screens/settings_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('Uncaught: $error\n$stack');
+    return true;
+  };
   runApp(const VerityDashboardApp());
 }
 
@@ -81,8 +91,14 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     // the screen is locked. Rather than hoping the stream silently recovers
     // on its own, proactively re-check and restart on resume so returning
     // to the app shows live data immediately instead of a stale chart.
+    final repo = context.read<PolarRepository>();
     if (state == AppLifecycleState.resumed) {
-      context.read<PolarRepository>().onAppResumed();
+      repo.onAppResumed();
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      repo.onAppPaused();
     }
   }
 

@@ -45,6 +45,10 @@ class LocalDb {
     return openDatabase(
       path,
       version: _schemaVersion,
+      onConfigure: (db) async {
+        await db.execute('PRAGMA foreign_keys = ON');
+        await db.rawQuery('PRAGMA journal_mode = WAL');
+      },
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE sessions(
@@ -261,6 +265,33 @@ class LocalDb {
     final db = await database;
     await db.delete('samples', where: 'session_id = ?', whereArgs: [sessionId]);
     await db.delete('sessions', where: 'id = ?', whereArgs: [sessionId]);
+  }
+
+  /// Close recordings that were still open when the process died
+  /// (force-stop, crash, battery death). Uses the last sample time so
+  /// duration stays honest.
+  Future<int> finalizeOrphanedSessions({int? nowMs}) async {
+    final db = await database;
+    final orphans = await db.query(
+      'sessions',
+      where: 'end_time_ms IS NULL',
+      columns: ['id', 'start_time_ms'],
+    );
+    for (final row in orphans) {
+      final id = row['id'] as String;
+      final start = row['start_time_ms'] as int? ??
+          nowMs ??
+          DateTime.now().millisecondsSinceEpoch;
+      final last = await db.rawQuery(
+        'SELECT MAX(timestamp_ms) as t FROM samples WHERE session_id = ?',
+        [id],
+      );
+      // Prefer last sample so a crash does not stretch duration to relaunch.
+      final end = last.first['t'] as int? ?? start;
+      final count = await getSampleCount(id);
+      await updateSessionSampleCount(id, count, endTimeMs: end);
+    }
+    return orphans.length;
   }
 
   Future<void> deleteAllSessions() async {

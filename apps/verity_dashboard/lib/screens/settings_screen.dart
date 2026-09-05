@@ -499,8 +499,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('About', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('Verity Dashboard v1.2.3'),
+                  const Text('Verity Dashboard v1.2.4'),
                   const Text('Offline-first Polar Verity Sense client'),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Personal fitness display only — not a medical device. '
+                    'Keep the app on-screen while recording; Android may pause '
+                    'Bluetooth if the screen is locked. Recordings stay on this '
+                    'phone and are not backed up to Google.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
               ),
             ),

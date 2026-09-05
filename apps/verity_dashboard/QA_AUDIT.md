@@ -313,3 +313,56 @@ history):**
   offline-recording file API (2.1.0+ firmware feature); on-device history
   import is limited to the exercise-entry API, which is what Polar Flow
   itself also uses for this sensor.
+
+## 8. Final VM production audit (v1.2.4)
+
+Ran on the Cloud Agent VM (Flutter 3.47.2, Java 21, no physical BLE).
+
+### Automated gate
+
+Recorded after the VM run in this audit (see commit / PR notes if a
+row is still pending).
+
+| Check | Result |
+|---|---|
+| `flutter analyze` | Pending this run |
+| `flutter test --concurrency=1 --timeout 30s` | Pending this run |
+| Release APK zip-aligned + signed | Pending this run |
+| `aapt dump badging` | Pending this run |
+| BLE permissions in merged manifest | SCAN / CONNECT / legacy BLUETOOTH |
+
+### Blockers found on this pass and fixed in v1.2.4
+
+- Recording flush cleared the in-memory buffer **before** SQLite insert.
+  A failed write dropped those samples. Insert is now tried first-restore
+  on failure, and concurrent timer/size flushes are serialized.
+- Force-stop / crash left `sessions.end_time_ms` NULL. Launch now
+  finalizes orphans at the last sample time (not "now", so duration
+  stays honest).
+- Session `data_types` was snapshotted from stream flags that were not
+  set yet (`hr,ppg` while motion/PPI were intended). Types now come
+  from the user's settings (and omit HR/PPI when SDK Mode is on).
+- `android:allowBackup` was on, so Google Backup could have copied the
+  health SQLite and Polar Flow tokens. Backup and device-transfer of
+  app data are now denied.
+- Uncaught Flutter / platform errors had no handler.
+- App pause / lock / BLE drop did not flush the 2-second write buffer.
+
+### Accepted for personal sideload — not Play Store ready
+
+| Item | Why it is accepted |
+|---|---|
+| `applicationId` `com.example.verity_dashboard` | Changing it would force uninstall and lose local recordings |
+| Sideload keystore passwords in `build.gradle.kts` | Personal sideload only; same key is required for updates |
+| Polar Flow client secret in SharedPreferences | Stays on-device; backup of prefs is now blocked |
+| No Android foreground service | Polar plugin has none. Lock-screen / background BLE can stall. Keep the app on-screen while recording. Do not add an untested FGS here. |
+| No physical BLE / Polar Flow live account on this VM | Hardware checklist in §§1–6 still applies |
+| Not a medical device | Settings → About states this |
+
+### Verdict
+
+**Sideload-ready for personal use** after installing v1.2.4 over the
+previous build (same signing key). **Not Play-Store-ready.** Confirm
+on the phone: Record → force-stop → relaunch (session closed, samples
+kept); lock screen for 60s during Record (expect possible BLE stall,
+samples flushed up to the pause); SDK Mode off for live HR.

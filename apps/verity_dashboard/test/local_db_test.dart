@@ -180,6 +180,71 @@ void main() {
       expect(await db.getSampleCount(id), 0);
     });
 
+    test('finalizeOrphanedSessions closes open recordings at last sample', () async {
+      final db = LocalDb.instance;
+      final id = 'test-orphan-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'Orphan',
+        startTimeMs: 1000,
+        dataTypes: 'hr,ppg',
+      ));
+      await db.insertSamples(id, [
+        SensorSample(timestampMs: 2000, hr: 70),
+        SensorSample(timestampMs: 5000, hr: 72),
+      ]);
+      expect((await db.getSession(id))!.endTimeMs, isNull);
+
+      final n = await db.finalizeOrphanedSessions(nowMs: 99000);
+      expect(n, 1);
+      final session = await db.getSession(id);
+      expect(session!.endTimeMs, 5000);
+      expect(session.sampleCount, 2);
+      expect(session.duration, const Duration(milliseconds: 4000));
+
+      await db.deleteSession(id);
+    });
+
+    test('finalizeOrphanedSessions uses start time when no samples landed', () async {
+      final db = LocalDb.instance;
+      final id = 'test-empty-orphan-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'Empty',
+        startTimeMs: 1000,
+        dataTypes: 'hr',
+      ));
+
+      await db.finalizeOrphanedSessions(nowMs: 99000);
+      final session = await db.getSession(id);
+      expect(session!.endTimeMs, 1000);
+      expect(session.sampleCount, 0);
+
+      await db.deleteSession(id);
+    });
+
+    test('finalizeOrphanedSessions leaves already-closed sessions alone', () async {
+      final db = LocalDb.instance;
+      final id = 'test-closed-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'Closed',
+        startTimeMs: 1000,
+        endTimeMs: 4000,
+        dataTypes: 'hr',
+        sampleCount: 1,
+      ));
+      await db.insertSamples(id, [SensorSample(timestampMs: 2000, hr: 64)]);
+
+      expect(await db.finalizeOrphanedSessions(nowMs: 99000), 0);
+      expect((await db.getSession(id))!.endTimeMs, 4000);
+
+      await db.deleteSession(id);
+    });
+
     test('deleteSession cascades to samples', () async {
       final db = LocalDb.instance;
       final id = 'test-cascade-${_uuid.v4()}';

@@ -146,6 +146,7 @@ class PolarRepository {
   String? _currentSessionId;
   final List<SensorSample> _sessionBuffer = [];
   Timer? _flushTimer;
+  Future<void> _flushLock = Future.value();
 
   PolarRepository() {
     _loadPrefs();
@@ -185,12 +186,13 @@ class PolarRepository {
       if (_connectedDeviceId == event.info.deviceId) {
         _connectedDeviceId = null;
       }
-    _readyFeatures.remove(event.info.deviceId);
-    _gyroUnsupported = false;
-    _magUnsupported = false;
-    _cancelAllStreamSubs();
+      _readyFeatures.remove(event.info.deviceId);
+      _gyroUnsupported = false;
+      _magUnsupported = false;
+      _cancelAllStreamSubs();
       _stopWatchdog();
       _connectionStateController.add('disconnected:${event.info.deviceId}');
+      unawaited(_flushSessionBuffer());
 
       if (!_userInitiatedDisconnect && _autoReconnectEnabled) {
         _scheduleReconnect(event.info.deviceId);
@@ -306,11 +308,15 @@ class PolarRepository {
   }
 
   String get activeRecordingTypes {
-    final types = <String>['hr', 'ppg'];
-    if (_ppiStreaming) types.add('ppi');
-    if (_accStreaming) types.add('acc');
-    if (_gyroStreaming) types.add('gyro');
-    if (_magStreaming) types.add('mag');
+    // Intended mix, not "streams that have already flipped their flag."
+    // startLocalSession used to snapshot types before ACC/PPI listeners
+    // attached, so the session row said hr,ppg while motion was coming in.
+    final types = <String>['ppg'];
+    if (!_sdkModeEnabled) types.insert(0, 'hr');
+    if (_recordPpi && !_sdkModeEnabled) types.add('ppi');
+    if (_recordAccel) types.add('acc');
+    if (_recordGyro) types.add('gyro');
+    if (_recordMag) types.add('mag');
     return types.join(',');
   }
 
@@ -331,6 +337,12 @@ class PolarRepository {
   /// remembered device or the setting is off (no-op).
   Future<void> tryAutoReconnectOnLaunch() async {
     await _loadPrefs();
+    try {
+      await _db.finalizeOrphanedSessions();
+      _sessionsChangedController.add(null);
+    } catch (_) {
+      // Launch must not die because a leftover session row is messy.
+    }
     if (_autoReconnectEnabled && _lastDeviceId != null && !isConnected) {
       _statusController.add('Auto-reconnecting to last device...');
       try {
@@ -373,6 +385,12 @@ class PolarRepository {
       return;
     }
     _checkStreamHealth();
+  }
+
+  /// Flush the recording buffer when the process may be killed (lock,
+  /// Home, task switch). Android can drop BLE shortly after this.
+  void onAppPaused() {
+    unawaited(_flushSessionBuffer());
   }
 
   void _startWatchdog() {
@@ -855,15 +873,32 @@ class PolarRepository {
     if (_currentSessionId == null) return;
     _sessionBuffer.add(sample);
     if (_sessionBuffer.length >= 100) {
-      _flushSessionBuffer();
+      unawaited(_flushSessionBuffer());
     }
   }
 
-  Future<void> _flushSessionBuffer() async {
+  Future<void> _flushSessionBuffer() {
+    final previous = _flushLock;
+    final gate = Completer<void>();
+    _flushLock = gate.future;
+    return previous.then((_) => _flushSessionBufferUnlocked()).whenComplete(gate.complete);
+  }
+
+  Future<void> _flushSessionBufferUnlocked() async {
     if (_currentSessionId == null || _sessionBuffer.isEmpty) return;
+    final sessionId = _currentSessionId!;
     final samples = List<SensorSample>.from(_sessionBuffer);
     _sessionBuffer.clear();
-    await _db.insertSamples(_currentSessionId!, samples);
+    try {
+      await _db.insertSamples(sessionId, samples);
+    } catch (e) {
+      if (_currentSessionId == sessionId) {
+        _sessionBuffer.insertAll(0, samples);
+      }
+      if (!_statusController.isClosed) {
+        _statusController.add('Could not save samples to the phone. Will retry.');
+      }
+    }
   }
 
   Future<void> deleteSession(String sessionId) async {
@@ -922,6 +957,7 @@ class PolarRepository {
     _flushTimer?.cancel();
     _watchdogTimer?.cancel();
     _reconnectTimer?.cancel();
+    unawaited(_flushSessionBuffer());
     _cancelAllStreamSubs();
     _deviceFoundController.close();
     _connectionStateController.close();
