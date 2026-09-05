@@ -34,7 +34,7 @@ export function SessionList({ sessions, ready }: SessionListProps) {
           Recordings stay in this browser. Connect a Polar Verity Sense or run
           a demo from the Live page, then stop the session to save it here.
         </p>
-        <Button className="mt-5" render={<Link href="/" />}>
+        <Button className="mt-5" nativeButton={false} render={<Link href="/" />}>
           Go to live session
         </Button>
       </div>
@@ -69,6 +69,7 @@ export function SessionList({ sessions, ready }: SessionListProps) {
             <div className="flex gap-2">
               <Button
                 variant="outline"
+                nativeButton={false}
                 render={<Link href={`/sessions/${session.id}`} />}
               >
                 Open

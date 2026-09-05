@@ -48,7 +48,7 @@ export default function SessionDetailPage() {
         <p className="mt-2 text-sm text-white/50">
           It may have been deleted from this browser, or the link is stale.
         </p>
-        <Button className="mt-5" render={<Link href="/sessions" />}>
+        <Button className="mt-5" nativeButton={false} render={<Link href="/sessions" />}>
           Back to sessions
         </Button>
       </div>
@@ -151,7 +151,7 @@ export default function SessionDetailPage() {
         </CardContent>
       </Card>
 
-      <Button variant="ghost" render={<Link href="/sessions" />}>
+      <Button variant="ghost" nativeButton={false} render={<Link href="/sessions" />}>
         Back to sessions
       </Button>
     </div>
