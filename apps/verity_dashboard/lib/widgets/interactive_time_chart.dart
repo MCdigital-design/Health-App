@@ -139,13 +139,14 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
   Widget build(BuildContext context) {
     final visible = _visible;
     final yValues = visible.map((p) => p.value);
-    final yRange = paddedRange(yValues);
-    final ticks = niceTicks(yRange.$1, yRange.$2);
-    final yInterval = ticks.length >= 2 ? (ticks[1] - ticks[0]).abs() : null;
+    final padded = paddedRange(yValues);
+    final snapped = snapRangeToNiceTicks(min: padded.$1, max: padded.$2);
+    final yInterval = snapped.interval;
     final xSpan = (_maxX - _minX).clamp(0.001, double.infinity);
     final xInterval = niceStep(xSpan, tickCount: 4);
     final spots = [for (final p in visible) FlSpot(p.seconds, p.value)];
     final zoomed = _viewMin != null;
+    final last = widget.points.isEmpty ? null : widget.points.last.value;
 
     return Card(
       child: Padding(
@@ -158,8 +159,24 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
                 Expanded(
                   child: Text(widget.title, style: Theme.of(context).textTheme.titleMedium),
                 ),
-                if (widget.unit != null)
-                  Text(widget.unit!, style: Theme.of(context).textTheme.bodySmall),
+                if (last != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: widget.color.withValues(alpha: 0.22),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      widget.unit == null
+                          ? formatExactValue(last)
+                          : '${formatExactValue(last)} ${widget.unit}',
+                      style: TextStyle(
+                        color: widget.color,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
               ],
             ),
             const SizedBox(height: 4),
@@ -184,8 +201,8 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
                         LineChartData(
                           minX: _minX,
                           maxX: _maxX,
-                          minY: yRange.$1,
-                          maxY: yRange.$2,
+                          minY: snapped.min,
+                          maxY: snapped.max,
                           clipData: const FlClipData.all(),
                           gridData: FlGridData(
                             show: true,
@@ -210,11 +227,15 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
                                 reservedSize: 48,
                                 interval: yInterval,
                                 getTitlesWidget: (value, meta) {
+                                  final n = (value / yInterval).roundToDouble();
+                                  if ((value - n * yInterval).abs() > yInterval * 0.02 + 1e-6) {
+                                    return const SizedBox.shrink();
+                                  }
                                   return SideTitleWidget(
                                     axisSide: meta.axisSide,
                                     space: 6,
                                     child: Text(
-                                      formatAxisNumber(value),
+                                      formatAxisTick(value),
                                       maxLines: 1,
                                       overflow: TextOverflow.clip,
                                       style: const TextStyle(fontSize: 10, color: Colors.white70),
@@ -252,7 +273,7 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
                               getTooltipItems: (touched) => [
                                 for (final t in touched)
                                   LineTooltipItem(
-                                    '${formatElapsed(t.x)}  ${formatAxisNumber(t.y)}${widget.unit != null ? ' ${widget.unit}' : ''}',
+                                    '${formatElapsed(t.x)}  ${formatExactValue(t.y)}${widget.unit != null ? ' ${widget.unit}' : ''}',
                                     const TextStyle(fontSize: 12, color: Colors.white),
                                   ),
                               ],

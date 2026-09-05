@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/time_series_buffer.dart';
+import '../polar/polar_errors.dart';
 import '../polar/polar_repository.dart';
 import '../widgets/heart_rate_ring.dart';
 import '../widgets/live_chart.dart';
@@ -52,8 +53,13 @@ class _LiveScreenState extends State<LiveScreen> {
     });
     _errorSub = _repo.errorStream.listen((message) {
       if (!mounted) return;
+      if (isAlreadyInStateError(message)) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), duration: const Duration(seconds: 5)),
+        SnackBar(
+          content: Text(message, maxLines: 2, overflow: TextOverflow.ellipsis),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
       );
     });
     _sdkModeSub = _repo.sdkModeStream.listen((on) {
@@ -70,8 +76,14 @@ class _LiveScreenState extends State<LiveScreen> {
     if (_repo.isConnected) {
       _sdkModeOn = _repo.isSdkModeOn;
       _connectionState = 'connected:${_repo.connectedDeviceId}';
-      _repo.startHrStreaming();
-      _repo.startPpgStreaming();
+      // Connect already auto-starts streams. Starting again issues another
+      // REQUEST_MEASUREMENT_START and Polar answers ERROR_ALREADY_IN_STATE.
+      if (!_repo.isHrActive) {
+        _repo.startHrStreaming();
+      }
+      if (!_repo.isPpgActive) {
+        _repo.startPpgStreaming();
+      }
     }
 
     _uiRefreshTimer = Timer.periodic(_uiRefreshInterval, (_) => _refreshCharts());
@@ -123,9 +135,28 @@ class _LiveScreenState extends State<LiveScreen> {
     final hrRange = _repo.hrBuffer.yRangeForTimeframe(_timeframe);
     final ppgRange = _repo.ppgBuffer.yRangeForTimeframe(_timeframe);
 
+    final deviceId = _repo.connectedDeviceId;
+    final deviceLabel = !connected
+        ? 'Not connected'
+        : [
+            if (deviceId != null && deviceId.isNotEmpty) deviceId,
+            if (_battery >= 0) '$_battery%',
+          ].join(' · ');
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Live'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Live'),
+            Text(
+              deviceLabel,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: Colors.white70,
+                  ),
+            ),
+          ],
+        ),
         actions: [
           TextButton.icon(
             onPressed: connected ? _toggleRecording : null,
@@ -230,13 +261,23 @@ class _LiveScreenState extends State<LiveScreen> {
                 value: _timeframe,
                 onChanged: (tf) => setState(() => _timeframe = tf),
               ),
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Window length on the chart — not the bucket size.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.white54,
+                      ),
+                ),
+              ),
               const SizedBox(height: 12),
               LayoutBuilder(
                 builder: (context, constraints) {
                   final wide = constraints.maxWidth > 700;
                   final hrChart = LiveChart(
                     spots: hrSpots,
-                    title: 'Heart Rate (bpm)',
+                    title: 'Heart Rate',
+                    unit: 'bpm',
                     color: Colors.redAccent,
                     timeframe: _timeframe,
                     yRange: hrRange,

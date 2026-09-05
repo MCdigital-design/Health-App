@@ -109,18 +109,69 @@ double niceStep(double range, {int tickCount = 4}) {
 }
 
 List<double> niceTicks(double min, double max, {int tickCount = 4}) {
-  if (!min.isFinite || !max.isFinite || min == max) {
-    return [min, max];
+  final snapped = snapRangeToNiceTicks(min: min, max: max, tickCount: tickCount);
+  final ticks = <double>[];
+  for (var v = snapped.min;
+      v <= snapped.max + snapped.interval * 0.01 && ticks.length < 12;
+      v += snapped.interval) {
+    ticks.add(v);
+  }
+  if (ticks.isEmpty) return [snapped.min, snapped.max];
+  return ticks;
+}
+
+/// Snap a padded data range onto even tick marks so fl_chart does not
+/// also paint the raw sample max (`164`, `360680`) as an extra ragged label.
+({double min, double max, double interval}) snapRangeToNiceTicks({
+  required double min,
+  required double max,
+  int tickCount = 4,
+}) {
+  if (!min.isFinite || !max.isFinite) {
+    return (min: 0, max: 1, interval: 1);
+  }
+  if (max < min) {
+    final tmp = min;
+    min = max;
+    max = tmp;
+  }
+  if (max == min) {
+    final slack = min.abs() < 1 ? 1.0 : min.abs() * 0.05;
+    min -= slack;
+    max += slack;
   }
   final step = niceStep(max - min, tickCount: tickCount);
-  final start = (min / step).floor() * step;
-  final ticks = <double>[];
-  // Guard against float drift creating a huge loop.
-  for (var v = start; v <= max + step * 0.5 && ticks.length < 12; v += step) {
-    if (v >= min - step * 0.05) ticks.add(v);
+  var niceMin = (min / step).floorToDouble() * step;
+  var niceMax = (max / step).ceilToDouble() * step;
+  if (niceMax <= niceMin) {
+    niceMax = niceMin + step;
   }
-  if (ticks.isEmpty) return [min, max];
-  return ticks;
+  if ((niceMax - niceMin) / step < 2) {
+    niceMax = niceMin + 2 * step;
+  }
+  return (min: niceMin, max: niceMax, interval: step);
+}
+
+/// Y/X tick text: whole numbers only (`120`, `360k`), never `360680` or `1.25`.
+String formatAxisTick(double value) {
+  if (!value.isFinite) return '--';
+  final abs = value.abs();
+  if (abs >= 1000000) {
+    return '${(value / 1000000).round()}M';
+  }
+  if (abs >= 1000) {
+    return '${(value / 1000).round()}k';
+  }
+  return value.round().toString();
+}
+
+/// Full-precision readout for the last sample (the "blue box"), not the axis.
+String formatExactValue(double value) {
+  if (!value.isFinite) return '--';
+  if (value == value.roundToDouble()) return value.toStringAsFixed(0);
+  if (value.abs() >= 100) return value.toStringAsFixed(1);
+  if (value.abs() >= 10) return value.toStringAsFixed(2);
+  return value.toStringAsFixed(3);
 }
 
 /// Compact single-line number for axis labels. Avoids the fl_chart default
@@ -159,6 +210,33 @@ String formatElapsed(double seconds) {
       ? '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}'
       : '${m.toString().padLeft(1, '0')}:${s.toString().padLeft(2, '0')}';
   return negative ? '-$body' : body;
+}
+
+/// Live-chart X labels: `now`, `-30s`, `-10m` — not `-600s`.
+String formatLiveAgo(double secondsFromNow) {
+  if (!secondsFromNow.isFinite) return '--';
+  if (secondsFromNow >= -0.51) return 'now';
+  final ago = -secondsFromNow;
+  if (ago < 60) return '-${ago.round()}s';
+  final minutes = ago / 60;
+  if (minutes < 60) return '-${minutes.round()}m';
+  return '-${(minutes / 60).round()}h';
+}
+
+/// Even X-tick spacing for a live window so labels stay on whole seconds/minutes.
+double liveXInterval(double windowSeconds) {
+  if (windowSeconds <= 15) return 5;
+  if (windowSeconds <= 30) return 15;
+  if (windowSeconds <= 120) return 60;
+  if (windowSeconds <= 600) return 300;
+  if (windowSeconds <= 1800) return 900;
+  return 3600;
+}
+
+String formatWindowLabel(Duration window) {
+  if (window.inSeconds < 60) return '${window.inSeconds}s';
+  if (window.inMinutes < 60) return '${window.inMinutes}m';
+  return '${window.inHours}h';
 }
 
 String formatBytes(int bytes) {

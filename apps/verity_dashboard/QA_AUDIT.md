@@ -107,13 +107,18 @@ the buffer on a fixed 500ms timer. Chart animation duration is set to zero
 so each throttled redraw is instant rather than competing with the next
 tick's animation.
 
-**New feature — timeframe selector:** `ChartTimeframe` defines
-Real-time/1s/5s/30s/1m/5m windows, each with a bucket size. Windows above
-"real-time" average raw samples into fixed-size buckets
-(`TimeSeriesBuffer.spotsForTimeframe`), so a 5-minute view of 55 Hz PPG
-data renders a few dozen points, not tens of thousands. Tested in
-`time_series_buffer_test.dart` (`aggregates into buckets for larger
-timeframes, reducing point count`).
+**New feature — timeframe selector:** `ChartTimeframe` chips name the
+*visible window* (Real-time / 30s / 2m / 10m / 30m / 2h). The old labels
+(1s / 5s / 30s / 1m / 5m) were bucket sizes, so a selected "30s" chip
+drew a 10-minute chart. Larger windows still average raw samples into
+buckets (`TimeSeriesBuffer.spotsForTimeframe`). Tested in
+`time_series_buffer_test.dart`.
+
+**Live screenshot follow-up (v1.2.1):** Y ticks no longer append the raw
+sample max (`164`, `360680`); X uses `now` / `-10m` instead of `-600s`;
+the last sample's full value sits in a colored chip; PPG watchdog uses
+phone wall-clock so it does not restart a healthy stream and raise
+`ERROR_ALREADY_IN_STATE`.
 
 **New feature — adaptive chart:** `LiveChart` uses `LayoutBuilder` to size
 itself relative to available width (clamped 140–260px), switches to a

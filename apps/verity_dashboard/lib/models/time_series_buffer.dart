@@ -1,4 +1,18 @@
 import 'package:fl_chart/fl_chart.dart';
+import '../charts/chart_math.dart';
+
+/// Snapped Y-axis range so Live and session charts share one interval.
+class ChartAxisRange {
+  final double min;
+  final double max;
+  final double interval;
+
+  const ChartAxisRange({
+    required this.min,
+    required this.max,
+    required this.interval,
+  });
+}
 
 /// A single (timestamp, value) reading.
 class TimedValue {
@@ -12,12 +26,15 @@ class TimedValue {
 /// readable regardless of the underlying sample rate (HR ~1 Hz, PPG up to
 /// ~176 Hz in SDK mode).
 enum ChartTimeframe {
+  // Labels are the *visible window*, not the bucket size. Selecting "30s"
+  // used to mean 10 minutes of data in 30-second buckets — the chip and
+  // the "last 10m" header contradicted each other.
   realtime(Duration(seconds: 15), Duration.zero, 'Real-time'),
-  s1(Duration(seconds: 30), Duration(seconds: 1), '1s'),
-  s5(Duration(minutes: 2), Duration(seconds: 5), '5s'),
-  s30(Duration(minutes: 10), Duration(seconds: 30), '30s'),
-  m1(Duration(minutes: 30), Duration(minutes: 1), '1m'),
-  m5(Duration(hours: 2), Duration(minutes: 5), '5m');
+  s1(Duration(seconds: 30), Duration(seconds: 1), '30s'),
+  s5(Duration(minutes: 2), Duration(seconds: 5), '2m'),
+  s30(Duration(minutes: 10), Duration(seconds: 30), '10m'),
+  m1(Duration(minutes: 30), Duration(minutes: 1), '30m'),
+  m5(Duration(hours: 2), Duration(minutes: 5), '2h');
 
   final Duration window;
   final Duration bucket;
@@ -109,9 +126,9 @@ class TimeSeriesBuffer {
     }).toList();
   }
 
-  /// Min/max of the currently visible window, with padding, for a stable
-  /// (non-flickering) Y axis. Returns null if there's no data.
-  (double, double)? yRangeForTimeframe(ChartTimeframe timeframe, {int? now}) {
+  /// Min/max of the currently visible window, padded then snapped to even
+  /// ticks so the axis never appends the raw sample extreme.
+  ChartAxisRange? yRangeForTimeframe(ChartTimeframe timeframe, {int? now}) {
     final spots = spotsForTimeframe(timeframe, now: now);
     if (spots.isEmpty) return null;
     var min = spots.first.y;
@@ -125,6 +142,11 @@ class TimeSeriesBuffer {
       max += 1;
     }
     final padding = (max - min) * 0.15;
-    return (min - padding, max + padding);
+    final snapped = snapRangeToNiceTicks(min: min - padding, max: max + padding);
+    return ChartAxisRange(
+      min: snapped.min,
+      max: snapped.max,
+      interval: snapped.interval,
+    );
   }
 }

@@ -42,7 +42,7 @@ Go to **Settings** and check the **SDK Mode** toggle. Verity Sense **disables He
 
 ### Chart timeframes
 
-The Live tab has a row of chips (Real-time / 1s / 5s / 30s / 1m / 5m) above the charts. Larger windows automatically average samples into buckets instead of plotting every point, so a 5-minute view stays fast and readable even for high-rate PPG data.
+The Live tab has a row of chips (Real-time / 30s / 2m / 10m / 30m / 2h) above the charts — those names are the visible window, not the bucket size. Larger windows automatically average samples into buckets instead of plotting every point. Axis ticks are whole numbers; the latest exact sample sits in the colored chip on each chart.
 
 ### Recording data
 

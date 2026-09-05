@@ -70,6 +70,37 @@ void main() {
         expect(ticks[i], greaterThan(ticks[i - 1]));
       }
     });
+
+    test('snapRangeToNiceTicks drops ragged extras like 164 and 360680', () {
+      final hr = snapRangeToNiceTicks(min: 104, max: 164);
+      expect(hr.max, isNot(164));
+      expect(hr.min % hr.interval, 0);
+      expect(hr.max % hr.interval, 0);
+      expect(niceTicks(hr.min, hr.max), isNot(contains(164)));
+
+      final ppg = snapRangeToNiceTicks(min: 320000, max: 360680);
+      expect(ppg.max, isNot(360680));
+      expect(ppg.max % ppg.interval, 0);
+      for (final tick in niceTicks(ppg.min, ppg.max)) {
+        expect(formatAxisTick(tick).contains('.'), isFalse);
+      }
+    });
+
+    test('formatAxisTick is a whole number; formatExactValue keeps the rest', () {
+      expect(formatAxisTick(360680), '361k');
+      expect(formatAxisTick(164), '164');
+      expect(formatAxisTick(1.25), '1');
+      expect(formatExactValue(360680), '360680');
+      expect(formatExactValue(125.4), '125.4');
+    });
+
+    test('formatLiveAgo uses now / minutes, not -600s', () {
+      expect(formatLiveAgo(0), 'now');
+      expect(formatLiveAgo(-30), '-30s');
+      expect(formatLiveAgo(-600), '-10m');
+      expect(formatLiveAgo(-400), '-7m');
+      expect(liveXInterval(600), 300);
+    });
   });
 
   group('storageProjection', () {

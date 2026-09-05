@@ -6,6 +6,7 @@ import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
 import '../models/time_series_buffer.dart';
 import '../storage/local_db.dart';
+import 'polar_errors.dart';
 
 /// Thrown when a Polar SDK feature does not become ready in time, e.g.
 /// because SDK Mode is disabling it (Verity Sense disables HR/PPI in SDK Mode).
@@ -28,6 +29,7 @@ const _prefRecordMag = 'recordMagnetometer';
 /// and self-healed within seconds rather than leaving a dead flat line.
 const _staleThreshold = Duration(seconds: 12);
 const _watchdogInterval = Duration(seconds: 5);
+const _restartCooldown = Duration(seconds: 15);
 
 /// How often to retry starting a stream that *should* be running (SDK Mode
 /// off, connected) but isn't currently active — covering the case where the
@@ -72,8 +74,8 @@ class PolarRepository {
   /// Live rolling buffers, keyed by real timestamps (not sample-count
   /// indices), shared by any screen that wants to chart them. See
   /// [TimeSeriesBuffer] for why this matters for correctness.
-  final TimeSeriesBuffer hrBuffer = TimeSeriesBuffer(retention: const Duration(minutes: 30));
-  final TimeSeriesBuffer ppgBuffer = TimeSeriesBuffer(retention: const Duration(minutes: 5));
+  final TimeSeriesBuffer hrBuffer = TimeSeriesBuffer(retention: const Duration(hours: 2));
+  final TimeSeriesBuffer ppgBuffer = TimeSeriesBuffer(retention: const Duration(hours: 2));
 
   String? _connectedDeviceId;
   String? get connectedDeviceId => _connectedDeviceId;
@@ -125,6 +127,10 @@ class PolarRepository {
   bool _ppgStartInProgress = false;
   int? _lastHrStartAttemptMs;
   int? _lastPpgStartAttemptMs;
+  int _lastHrWallClockMs = 0;
+  int _lastPpgWallClockMs = 0;
+  int _lastHrRestartMs = 0;
+  int _lastPpgRestartMs = 0;
 
   StreamSubscription? _hrSub;
   StreamSubscription? _ppgSub;
@@ -338,9 +344,15 @@ class PolarRepository {
     final nowMs = DateTime.now().millisecondsSinceEpoch;
 
     if (_hrStreaming) {
-      final last = hrBuffer.lastTimestampMs;
-      if (!_sdkModeEnabled && last != null && nowMs - last > _staleThreshold.inMilliseconds) {
+      // Use phone wall-clock, never Polar sample.timeStamp. Sensor clocks
+      // can sit in another epoch, which made a healthy stream look stalled
+      // and triggered REQUEST_MEASUREMENT_START every 5s.
+      if (!_sdkModeEnabled &&
+          _lastHrWallClockMs > 0 &&
+          nowMs - _lastHrWallClockMs > _staleThreshold.inMilliseconds &&
+          nowMs - _lastHrRestartMs > _restartCooldown.inMilliseconds) {
         _statusController.add('Heart rate stream stalled — restarting...');
+        _lastHrRestartMs = nowMs;
         _hrSub?.cancel();
         _hrStreaming = false;
         unawaited(startHrStreaming(silent: true));
@@ -358,9 +370,11 @@ class PolarRepository {
     }
 
     if (_ppgStreaming) {
-      final last = ppgBuffer.lastTimestampMs;
-      if (last != null && nowMs - last > _staleThreshold.inMilliseconds) {
+      if (_lastPpgWallClockMs > 0 &&
+          nowMs - _lastPpgWallClockMs > _staleThreshold.inMilliseconds &&
+          nowMs - _lastPpgRestartMs > _restartCooldown.inMilliseconds) {
         _statusController.add('PPG stream stalled — restarting...');
+        _lastPpgRestartMs = nowMs;
         _ppgSub?.cancel();
         _ppgStreaming = false;
         unawaited(startPpgStreaming(silent: true));
@@ -507,6 +521,21 @@ class PolarRepository {
     }
   }
 
+  void _emitStreamFailure(String stream, Object error, {required bool silent}) {
+    if (isAlreadyInStateError(error)) {
+      // Native measurement is already running. Do not show the raw
+      // PlatformException SnackBar that covered the Live charts.
+      _statusController.add('$stream is already measuring.');
+      return;
+    }
+    if (error is PolarFeatureTimeoutException) {
+      (silent ? _statusController : _errorController).add(error.toString());
+      return;
+    }
+    final message = friendlyPolarError(error, stream: stream);
+    (silent ? _statusController : _errorController).add(message);
+  }
+
   /// Starts HR streaming. [silent] routes failures to [statusStream]
   /// instead of [errorStream] — used for automatic background retries
   /// (watchdog, auto-start-on-connect) so a SnackBar doesn't pop up every
@@ -519,7 +548,7 @@ class PolarRepository {
     try {
       await _waitForFeature(PolarSdkFeature.hr);
     } catch (e) {
-      (silent ? _statusController : _errorController).add(e.toString());
+      _emitStreamFailure('Heart rate', e, silent: silent);
       _hrStartInProgress = false;
       return;
     }
@@ -534,6 +563,7 @@ class PolarRepository {
       (data) {
         for (final sample in data.samples) {
           final tsMs = DateTime.now().millisecondsSinceEpoch;
+          _lastHrWallClockMs = tsMs;
           hrBuffer.add(tsMs, sample.hr.toDouble());
           final sensorSample = SensorSample(
             timestampMs: tsMs,
@@ -546,7 +576,7 @@ class PolarRepository {
       },
       onError: (Object e) {
         _hrStreaming = false;
-        _errorController.add('Heart rate stream error: $e');
+        _emitStreamFailure('Heart rate', e, silent: silent);
       },
       onDone: () => _hrStreaming = false,
     );
@@ -559,7 +589,7 @@ class PolarRepository {
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      (silent ? _statusController : _errorController).add(e.toString());
+      _emitStreamFailure('PPG', e, silent: silent);
       _ppgStartInProgress = false;
       return;
     }
@@ -573,7 +603,11 @@ class PolarRepository {
     _ppgSub = _polar.startPpgStreaming(deviceId).listen(
       (data) {
         for (final sample in data.samples) {
-          final tsMs = sample.timeStamp.millisecondsSinceEpoch;
+          // Phone clock for the live buffer and SQLite row. Polar PPG
+          // timestamps are often a different epoch; comparing them to
+          // DateTime.now() made the watchdog think a live stream was dead.
+          final tsMs = DateTime.now().millisecondsSinceEpoch;
+          _lastPpgWallClockMs = tsMs;
           if (sample.channelSamples.isNotEmpty) {
             ppgBuffer.add(tsMs, sample.channelSamples.first.toDouble());
           }
@@ -587,7 +621,7 @@ class PolarRepository {
       },
       onError: (Object e) {
         _ppgStreaming = false;
-        _errorController.add('PPG stream error: $e');
+        _emitStreamFailure('PPG', e, silent: silent);
       },
       onDone: () => _ppgStreaming = false,
     );
@@ -608,7 +642,7 @@ class PolarRepository {
       (data) {
         for (final sample in data.samples) {
           final sensorSample = SensorSample(
-            timestampMs: sample.timeStamp.millisecondsSinceEpoch,
+            timestampMs: DateTime.now().millisecondsSinceEpoch,
             acc: [sample.x.toDouble(), sample.y.toDouble(), sample.z.toDouble()],
           );
           _liveSampleController.add(sensorSample);
@@ -640,7 +674,7 @@ class PolarRepository {
       (data) {
         for (final sample in data.samples) {
           final sensorSample = SensorSample(
-            timestampMs: sample.timeStamp.millisecondsSinceEpoch,
+            timestampMs: DateTime.now().millisecondsSinceEpoch,
             gyro: [sample.x.toDouble(), sample.y.toDouble(), sample.z.toDouble()],
           );
           _liveSampleController.add(sensorSample);
@@ -674,7 +708,7 @@ class PolarRepository {
       (data) {
         for (final sample in data.samples) {
           final sensorSample = SensorSample(
-            timestampMs: sample.timeStamp.millisecondsSinceEpoch,
+            timestampMs: DateTime.now().millisecondsSinceEpoch,
             mag: [sample.x.toDouble(), sample.y.toDouble(), sample.z.toDouble()],
           );
           _liveSampleController.add(sensorSample);

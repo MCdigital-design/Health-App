@@ -67,7 +67,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _errorSub = repo.errorStream.listen((message) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), duration: const Duration(seconds: 5)),
+        SnackBar(
+          content: Text(message, maxLines: 2, overflow: TextOverflow.ellipsis),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
       );
     });
     _statusSub = repo.statusStream.listen((message) {
@@ -480,7 +484,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('About', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('Verity Dashboard v1.2.0'),
+                  const Text('Verity Dashboard v1.2.1'),
                   const Text('Offline-first Polar Verity Sense client'),
                 ],
               ),
