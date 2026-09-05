@@ -349,6 +349,8 @@ row is still pending).
   app data are now denied.
 - Uncaught Flutter / platform errors had no handler.
 - App pause / lock / BLE drop did not flush the 2-second write buffer.
+- Polar Flow error SnackBars could show raw HTTP bodies (token JSON).
+  Failures now report the status code only.
 
 ### Accepted for personal sideload — not Play Store ready
 
