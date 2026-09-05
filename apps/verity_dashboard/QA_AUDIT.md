@@ -370,3 +370,24 @@ previous build (same signing key). **Not Play-Store-ready.** Confirm
 on the phone: Record → force-stop → relaunch (session closed, samples
 kept); lock screen for 60s during Record (expect possible BLE stall,
 samples flushed up to the pause); SDK Mode off for live HR.
+
+## 9. 16-minute vs 25-minute size (v1.2.5)
+
+No samples need to be sent. The session screens already show the cause.
+
+| Take | Duration | Rows | Size | What was stored |
+|---|---|---|---|---|
+| Sep 5 00:44 | 16m 27s | 42,363 | 1.71 MB | HR 987 + **PPG 41,376** + PPI 987 |
+| Sep 5 13:33 | 25m 39s | 1,540 | 28.5 KB | HR 1,540 + PPI 1,540 + **PPG 0** |
+
+There is **no compression**. PPG is ~40 Hz. 16 minutes × 40 × 60 ≈ 38,400
+rows — that is the 1.71 MB file. Heart rate is ~1 Hz, so 25 minutes is
+~1,500 rows and tens of KB. Motion was zero on both older takes.
+
+HRV “Beats 0” on the 25-minute take: Polar often omits RR on optical HR.
+An empty PPI list was stored as `""`, which counted as PPI but produced
+no intervals. Empty lists now store NULL; RMSSD still needs real RR/PPI.
+
+ChatGPT device-code login (`auth.openai.com/codex/device`) was implemented
+in the AI tab. The usercode endpoint returned HTTP 200 from this VM.
+Sending a real question still needs the user’s ChatGPT approval on a phone.

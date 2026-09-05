@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../polar/accesslink_service.dart';
 import '../polar/polar_repository.dart';
+import '../widgets/collapsible_hint.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -371,13 +372,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Imports exercises already uploaded to your Polar Flow account, including ones '
-                    'no longer on the sensor itself. Requires your own free API client from '
-                    'admin.polaraccesslink.com — this cannot be set up on your behalf, since it '
-                    'needs your Polar account login.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'How Polar Flow import works',
+                    body:
+                        'Imports exercises already uploaded to your Polar Flow account, including ones '
+                        'no longer on the sensor itself. Requires your own free API client from '
+                        'admin.polaraccesslink.com — this cannot be set up on your behalf, since it '
+                        'needs your Polar account login.',
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -410,10 +411,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Text(
-                    'After approving in the browser, it will redirect to a URL that fails to load '
-                    '(that\'s expected) — copy that full URL from the address bar and paste it below.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'After you approve in the browser',
+                    body:
+                        'The redirect URL will fail to load — that is expected. Copy that full URL '
+                        'from the address bar and paste it below.',
                   ),
                   const SizedBox(height: 8),
                   TextField(
@@ -450,14 +452,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Storage and privacy', style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Recordings stay in a SQLite file on this phone. They are not uploaded '
-                    'to GitHub and they do not sync to Polar Flow. Heart-rate and PPG are '
-                    'health data — do not put them in a public repository.\n\n'
-                    'Delete one session from its detail screen (trash icon), or remove every '
-                    'recording below. Uninstalling the app also deletes the database.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'What stays on this phone',
+                    body:
+                        'Recordings stay in a SQLite file on this phone. They are not uploaded '
+                        'to GitHub and they do not sync to Polar Flow. Heart-rate and PPG are '
+                        'health data — do not put them in a public repository.\n\n'
+                        'Delete one session from its detail screen (trash icon), or remove every '
+                        'recording below. Uninstalling the app also deletes the database.',
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
@@ -499,15 +501,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('About', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('Verity Dashboard v1.2.4'),
+                  const Text('Verity Dashboard v1.2.5'),
                   const Text('Offline-first Polar Verity Sense client'),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Personal fitness display only — not a medical device. '
-                    'Keep the app on-screen while recording; Android may pause '
-                    'Bluetooth if the screen is locked. Recordings stay on this '
-                    'phone and are not backed up to Google.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'Not a medical device',
+                    body:
+                        'Personal fitness display only — not a medical device. '
+                        'Keep the app on-screen while recording; Android may pause '
+                        'Bluetooth if the screen is locked. Recordings stay on this '
+                        'phone and are not backed up to Google. Optional ChatGPT '
+                        'chat uses your own OpenAI login and only sends a compact '
+                        'summary when you ask a question.',
                   ),
                 ],
               ),

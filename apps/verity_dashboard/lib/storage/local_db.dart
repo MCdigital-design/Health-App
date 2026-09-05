@@ -212,11 +212,11 @@ class LocalDb {
       SELECT
         COUNT(*) as total,
         COUNT(hr) as hr,
-        COUNT(ppg) as ppg,
-        COUNT(ppi) as ppi,
-        COUNT(acc) as acc,
-        COUNT(gyro) as gyro,
-        COUNT(mag) as mag
+        COUNT(CASE WHEN ppg IS NOT NULL AND length(ppg) > 0 THEN 1 END) as ppg,
+        COUNT(CASE WHEN ppi IS NOT NULL AND length(ppi) > 0 THEN 1 END) as ppi,
+        COUNT(CASE WHEN acc IS NOT NULL AND length(acc) > 0 THEN 1 END) as acc,
+        COUNT(CASE WHEN gyro IS NOT NULL AND length(gyro) > 0 THEN 1 END) as gyro,
+        COUNT(CASE WHEN mag IS NOT NULL AND length(mag) > 0 THEN 1 END) as mag
       FROM samples WHERE session_id = ?
     ''', [sessionId]);
     if (rows.isEmpty) return SessionSampleCounts.empty;

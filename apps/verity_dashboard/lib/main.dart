@@ -6,6 +6,7 @@ import 'polar/polar_repository.dart';
 import 'screens/live_screen.dart';
 import 'screens/recordings_screen.dart';
 import 'screens/dashboard_screen.dart';
+import 'screens/ai_screen.dart';
 import 'screens/settings_screen.dart';
 
 void main() {
@@ -64,6 +65,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     LiveScreen(),
     RecordingsScreen(),
     DashboardScreen(),
+    AiScreen(),
     SettingsScreen(),
   ];
 
@@ -116,6 +118,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
           NavigationDestination(icon: Icon(Icons.favorite), label: 'Live'),
           NavigationDestination(icon: Icon(Icons.folder), label: 'Recordings'),
           NavigationDestination(icon: Icon(Icons.dashboard), label: 'Dashboard'),
+          NavigationDestination(icon: Icon(Icons.auto_awesome), label: 'AI'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),

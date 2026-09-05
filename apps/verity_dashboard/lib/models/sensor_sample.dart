@@ -24,11 +24,11 @@ class SensorSample {
       'session_id': sessionId,
       'timestamp_ms': timestampMs,
       'hr': hr,
-      'ppi': ppi?.join(','),
-      'ppg': ppg?.join(','),
-      'acc': acc?.join(','),
-      'gyro': gyro?.join(','),
-      'mag': mag?.join(','),
+      'ppi': _joinOrNull(ppi),
+      'ppg': _joinOrNull(ppg),
+      'acc': _joinOrNull(acc),
+      'gyro': _joinOrNull(gyro),
+      'mag': _joinOrNull(mag),
     };
   }
 
@@ -49,10 +49,21 @@ class SensorSample {
     return math.sqrt(x * x + y * y + z * z);
   }
 
+  static String? _joinOrNull(List<Object>? values) {
+    if (values == null || values.isEmpty) return null;
+    return values.join(',');
+  }
+
   static SensorSample fromMap(Map<String, dynamic> map) {
     List<int>? parseIntList(String? value) {
       if (value == null || value.isEmpty) return null;
-      return value.split(',').map((e) => int.tryParse(e) ?? 0).toList();
+      // Polar sometimes writes 800.4; int.tryParse would become 0 and
+      // HRV would drop every beat (the 25-minute take looked like 0 beats).
+      return value.split(',').map((e) {
+        final asInt = int.tryParse(e.trim());
+        if (asInt != null) return asInt;
+        return double.tryParse(e.trim())?.round() ?? 0;
+      }).toList();
     }
 
     List<double>? parseDoubleList(String? value) {

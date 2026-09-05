@@ -7,7 +7,9 @@ import '../metrics/hrv.dart';
 import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
 import '../storage/local_db.dart';
+import '../widgets/collapsible_hint.dart';
 import '../widgets/interactive_time_chart.dart';
+import 'ai_screen.dart';
 
 class SessionDetailScreen extends StatefulWidget {
   final RecordingSession session;
@@ -127,6 +129,19 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
       appBar: AppBar(
         title: Text(session.name),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.auto_awesome),
+            tooltip: 'Ask AI about this session',
+            onPressed: _loading
+                ? null
+                : () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => AiScreen(focusSession: session),
+                      ),
+                    );
+                  },
+          ),
           IconButton(icon: const Icon(Icons.ios_share), onPressed: _loading ? null : _export),
           IconButton(icon: const Icon(Icons.delete), onPressed: _delete),
         ],
@@ -171,12 +186,6 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Sample breakdown', style: Theme.of(context).textTheme.titleMedium),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Each number is a full stored row, not a compressed summary. '
-                          'PPG at ~40 Hz for 16 minutes is about 40,000 rows — that is expected.',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 12,
@@ -191,27 +200,51 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                             _CountChip(label: 'Mag', count: _counts.mag),
                           ],
                         ),
-                        if (_counts.acc == 0 && _counts.gyro == 0 && _counts.mag == 0)
+                        if (_counts.ppg == 0 && _counts.hr > 0)
                           const Padding(
                             padding: EdgeInsets.only(top: 12),
                             child: Text(
-                              'This older take never started motion streams. New recordings '
-                              'request accelerometer, gyroscope, and magnetometer together '
-                              'with HR and PPG (Settings → Motion sensors). Polar documents '
-                              'those six online streams on Verity Sense. SDK Mode is left '
-                              'off so heart rate stays on.',
+                              'No PPG in this take — that is why a longer session can be '
+                              'much smaller than a shorter one.',
+                              style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
+                            ),
+                          ),
+                        if (_counts.acc == 0 && _counts.gyro == 0 && _counts.mag == 0)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: Text(
+                              'No motion samples. New recordings start accel / gyro / mag '
+                              'from Settings → Motion sensors.',
                               style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
                             ),
                           ),
                         if (_counts.total > 0 && _counts.hr == 0)
                           const Padding(
-                            padding: EdgeInsets.only(top: 12),
+                            padding: EdgeInsets.only(top: 8),
                             child: Text(
-                              'This session has no HR samples — the heart rate stream was not '
-                              'delivering data for its entire duration (most commonly because SDK '
-                              'Mode was on the whole time, which disables HR on Verity Sense).',
+                              'No HR samples. SDK Mode on Verity Sense disables heart rate.',
                               style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
                             ),
+                          ),
+                        const CollapsibleHint(
+                          label: 'Why row counts differ',
+                          body:
+                              'Nothing is compressed. Each number is a full stored row.\n\n'
+                              'Heart rate is about 1 row per second, so 25 minutes is ~1,500 '
+                              'rows and tens of KB. PPG is about 40 rows per second, so 16 '
+                              'minutes is ~40,000 rows and ~1.7 MB. Motion at 52 Hz is similar '
+                              'to PPG. A short take with PPG is always larger than a long take '
+                              'with only HR/PPI.',
+                        ),
+                        if (_counts.acc == 0 && _counts.gyro == 0 && _counts.mag == 0)
+                          const CollapsibleHint(
+                            label: 'Why motion is zero',
+                            body:
+                                'Older takes never asked the sensor for accelerometer, '
+                                'gyroscope, or magnetometer. New recordings request those '
+                                'together with HR and PPG. Polar documents those six online '
+                                'streams on Verity Sense. SDK Mode is left off so heart rate '
+                                'stays on.',
                           ),
                       ],
                     ),
@@ -317,17 +350,13 @@ class _StorageCard extends StatelessWidget {
               '${formatBytes(bytes)}  ·  $totalSamples full-size rows',
               style: Theme.of(context).textTheme.titleSmall,
             ),
-            const SizedBox(height: 8),
-            Text(
-              storageProjection(bytes: bytes, duration: duration),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Delete this session with the trash icon, or clear every recording '
-              'under Settings. Uninstalling the app or clearing its Android storage '
-              'also removes the SQLite file.',
-              style: Theme.of(context).textTheme.bodySmall,
+            CollapsibleHint(
+              label: 'How storage works',
+              body:
+                  '${storageProjection(bytes: bytes, duration: duration)}\n\n'
+                  'Delete this session with the trash icon, or clear every recording '
+                  'under Settings. Uninstalling the app or clearing its Android storage '
+                  'also removes the SQLite file.',
             ),
           ],
         ),
@@ -348,19 +377,19 @@ class _PrivacyCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Where this data lives', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              'Live recordings in this app are one-way Bluetooth streams onto the '
-              'phone. They are not written back to the sensor, and they do not sync '
-              'to Polar Flow or the official Polar app. Sessions you record here will '
-              'not appear there.\n\n'
-              'The sensor only keeps its own button-press exercises (recording / '
-              'swimming mode). Those can sync to Polar Flow if the sensor is paired '
-              'with a Polar account — that is a separate pipeline.\n\n'
-              'This app does not upload health data to GitHub. A public repo is the '
-              'wrong place for heart-rate and PPG traces. Share a CSV yourself only '
-              'if you intend to.',
-              style: Theme.of(context).textTheme.bodySmall,
+            const CollapsibleHint(
+              label: 'Phone only — not Polar Flow or GitHub',
+              body:
+                  'Live recordings in this app are one-way Bluetooth streams onto the '
+                  'phone. They are not written back to the sensor, and they do not sync '
+                  'to Polar Flow or the official Polar app. Sessions you record here will '
+                  'not appear there.\n\n'
+                  'The sensor only keeps its own button-press exercises (recording / '
+                  'swimming mode). Those can sync to Polar Flow if the sensor is paired '
+                  'with a Polar account — that is a separate pipeline.\n\n'
+                  'This app does not upload health data to GitHub. A public repo is the '
+                  'wrong place for heart-rate and PPG traces. Share a CSV yourself only '
+                  'if you intend to.',
             ),
           ],
         ),
@@ -383,15 +412,6 @@ class _HrvCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Heart-rate variability', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              'HRV is the change in time between beats. Polar Verity Sense '
-              'gives those intervals on the HR stream (and a dedicated PPI '
-              'stream while you Record). RMSSD is the usual recovery number; '
-              'we calculate it on the phone from stored beats — nothing extra '
-              'is sent to Polar or GitHub.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 12,
@@ -404,6 +424,24 @@ class _HrvCard extends StatelessWidget {
                 _MetricChip(label: 'Min / max', value: hrv.minHr == null ? '—' : '${hrv.minHr}–${hrv.maxHr}'),
                 _MetricChip(label: 'Beats', value: '${hrv.intervalCount}'),
               ],
+            ),
+            if (hrv.intervalCount == 0)
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: Text(
+                  'No usable beat intervals. Polar often omits RR on optical HR; '
+                  'RMSSD needs those intervals — BPM alone is not enough.',
+                  style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
+                ),
+              ),
+            const CollapsibleHint(
+              label: 'What HRV is',
+              body:
+                  'HRV is the change in time between beats. Polar Verity Sense '
+                  'gives those intervals on the HR stream (and a dedicated PPI '
+                  'stream while you Record). RMSSD is the usual recovery number; '
+                  'we calculate it on the phone from stored beats — nothing extra '
+                  'is sent to Polar or GitHub.',
             ),
           ],
         ),

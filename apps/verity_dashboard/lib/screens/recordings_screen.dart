@@ -7,6 +7,7 @@ import '../charts/chart_math.dart';
 import '../polar/accesslink_service.dart';
 import '../polar/polar_repository.dart';
 import '../storage/local_db.dart';
+import '../widgets/collapsible_hint.dart';
 import 'session_detail_screen.dart';
 
 class RecordingsScreen extends StatefulWidget {
@@ -151,13 +152,13 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   Text('On Device (not yet synced)', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Training sessions recorded using the sensor\'s own button (recording or '
-                    'swimming mode). This requires the sensor to be registered with a Polar '
-                    'Flow account — a Polar Verity Sense limitation, not something this app '
-                    'controls. Tap the download icon to pull one onto the phone.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'What this list is',
+                    body:
+                        'Training sessions recorded using the sensor\'s own button (recording or '
+                        'swimming mode). This requires the sensor to be registered with a Polar '
+                        'Flow account — a Polar Verity Sense limitation, not something this app '
+                        'controls. Tap the download icon to pull one onto the phone.',
                   ),
                   const SizedBox(height: 8),
                   if (_deviceExercises.isEmpty)
@@ -180,12 +181,12 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                         )),
                   const SizedBox(height: 24),
                   Text('Polar Flow import', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Sessions already uploaded to your Polar Flow account (including ones no '
-                    'longer stored on the sensor itself). Requires a one-time setup in Settings '
-                    'using your own free Polar API client.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'Cloud history, not live recordings',
+                    body:
+                        'Sessions already uploaded to your Polar Flow account (including ones no '
+                        'longer stored on the sensor itself). Requires a one-time setup in Settings '
+                        'using your own free Polar API client.',
                   ),
                   const SizedBox(height: 8),
                   Card(
@@ -216,11 +217,11 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                   ),
                   const SizedBox(height: 24),
                   Text('All sessions on phone', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Live recordings stay on this phone only. They do not appear in Polar Flow '
-                    'or the official Polar app. Tap a session for charts, storage, and delete.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'These stay on the phone',
+                    body:
+                        'Live recordings stay on this phone only. They do not appear in Polar Flow '
+                        'or the official Polar app. Tap a session for charts, storage, and delete.',
                   ),
                   const SizedBox(height: 8),
                   if (_sessions.isEmpty)

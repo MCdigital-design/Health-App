@@ -12,9 +12,17 @@ installed a version, just install this one on top - no need to uninstall.
 4. If Play Protect warns: More details -> Install anyway.
 
 Requires Android 8.0 or newer. Release-signed (not debug/testOnly).
-SHA256: c836f035b71558b3cd5cd8c1e5aae17878fac7412e34de7654f9d9ff689bf4a3
+SHA256: 912b2334d83bed7c96c6886ec235fc5d88bcf2137d8662b105c3f92a6edb3c3f
 
-WHAT'S NEW IN THIS BUILD (v1.2.4 — production hardening):
+WHAT'S NEW IN THIS BUILD (v1.2.5 — size explainer, collapsible copy, ChatGPT):
+
+- A 25-minute HR-only take is supposed to be ~28 KB. A 16-minute take
+  with PPG is ~1.7 MB. Nothing is compressed — PPG is ~40 rows/second.
+- Long Q&A copy is collapsed behind tap-to-expand hints.
+- New AI tab: Sign in with ChatGPT at auth.openai.com/codex/device using
+  your own subscription. Only a compact session summary is sent.
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.4 — production hardening):
 
 - Crash / force-stop no longer leaves a recording open forever. Relaunch
   closes it at the last saved sample.

@@ -104,6 +104,26 @@ void main() {
       await db.deleteSession(id);
     });
 
+    test('empty PPI list does not count as a beat-interval row', () async {
+      final db = LocalDb.instance;
+      final id = 'test-empty-ppi-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'HrOnly',
+        startTimeMs: 1000,
+        dataTypes: 'hr',
+      ));
+      await db.insertSamples(id, [
+        SensorSample(timestampMs: 1, hr: 70, ppi: []),
+        SensorSample(timestampMs: 2, hr: 72),
+      ]);
+      final counts = await db.getSampleTypeCounts(id);
+      expect(counts.hr, 2);
+      expect(counts.ppi, 0);
+      await db.deleteSession(id);
+    });
+
     test('sessionExistsForExternalId prevents duplicate imports', () async {
       final db = LocalDb.instance;
       final id = 'polarflow:test-${_uuid.v4()}';
