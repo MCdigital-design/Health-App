@@ -163,14 +163,26 @@ explicit explanation when HR is zero but other signals aren't.
 | Is anything actually saved? | Yes — SQLite, on disk, since before this audit. |
 | Only held in memory? | No. Flushed every 2s during recording and on stop. |
 | Can sessions be stored locally? | Yes, already the only mechanism. |
-| Estimated storage per hour | HR only (~1 Hz): ~150–200 KB/hour. PPG (~55 Hz, 2 channels): ~14–18 MB/hour — this dominates total size. ACC/gyro/mag @52Hz add roughly similar per-hour cost each if enabled simultaneously. |
+| Estimated storage per hour | HR only (~1 Hz): ~150–200 KB/hour. PPG (~42–55 Hz): ~6–18 MB/hour — this dominates total size. ACC @50 Hz adds roughly ~15 MB/hour if enabled. Gyro/mag similar if they actually stream. |
+| Condensed or full table? | Full table. One SQLite row per sample, text-encoded channel lists. Charts downsample only for drawing. |
 | Need a backend/VPS/DB? | No. This is single-user, single-device. A server only becomes justified for multi-device sync, multi-user access, or off-device backup — none apply here. |
+| Upload to GitHub? | No. Heart-rate and PPG are health data. This repo is public. CSV export stays on the phone. |
+| Sync to Polar official app? | No. Live recordings are a one-way BLE stream into this app. Polar Flow only sees button-press exercises if the sensor is paired with a Polar account. |
+| How to delete | Session detail trash icon, Settings → Delete all recordings, or uninstall / clear app storage. |
 | Local-first, sync later? | Recommended as-is. If cross-device access is ever needed, Polar Flow's own cloud (already integrated, §6) or a simple file-sync of the SQLite database is far less work than standing up a backend. |
 
 **New feature:** session detail screen
-(`lib/screens/session_detail_screen.dart`) — full charts, per-type sample
-counts, an on-disk size estimate, delete, and CSV export (written to the
-app's external files directory, path shown to the user).
+(`lib/screens/session_detail_screen.dart`) — interactive time charts
+(pinch/drag/zoom with elapsed-time X and adaptive Y), per-type sample
+counts, an on-disk size estimate with hourly projection, delete, and CSV
+export (written to the app's external files directory, path shown to the
+user).
+
+**Bug found and fixed — session HR chart said "No data" while counts showed
+hundreds of HR samples:** `getSamples` silently limited to 5,000 rows
+ordered by timestamp. Polar PPG timestamps can sort entirely before
+phone-clock HR rows, so the first page was all PPG. Charts now query each
+signal separately and plot elapsed seconds, not row index.
 
 **Manual test checklist:**
 

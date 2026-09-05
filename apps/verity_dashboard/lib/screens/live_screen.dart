@@ -94,7 +94,7 @@ class _LiveScreenState extends State<LiveScreen> {
         const SnackBar(content: Text('Recording saved. See it under Recordings > On Phone.')),
       );
     } else {
-      await _repo.startLocalSession('Live Session', 'hr,ppg');
+      await _repo.startLocalSession('Live Session');
       setState(() => _recording = true);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -184,7 +184,7 @@ class _LiveScreenState extends State<LiveScreen> {
                 _InfoBanner(
                   color: Colors.red,
                   icon: Icons.fiber_manual_record,
-                  text: 'Recording to phone...',
+                  text: 'Recording full-rate samples to this phone only — not Polar Flow, not GitHub.',
                 ),
               const SizedBox(height: 8),
               Card(
@@ -268,6 +268,18 @@ class _LiveScreenState extends State<LiveScreen> {
                 },
               ),
               const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _StreamChip(label: 'HR', active: _repo.isHrActive),
+                  _StreamChip(label: 'PPG', active: _repo.isPpgActive),
+                  _StreamChip(label: 'Accel', active: _repo.isAccActive),
+                  _StreamChip(label: 'Gyro', active: _repo.isGyroActive),
+                  _StreamChip(label: 'Mag', active: _repo.isMagActive),
+                ],
+              ),
+              const SizedBox(height: 12),
               Row(
                 children: [
                   Expanded(
@@ -318,6 +330,22 @@ class _TimeframeSelector extends StatelessWidget {
           );
         }).toList(),
       ),
+    );
+  }
+}
+
+class _StreamChip extends StatelessWidget {
+  final String label;
+  final bool active;
+
+  const _StreamChip({required this.label, required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      visualDensity: VisualDensity.compact,
+      backgroundColor: active ? Colors.green.withValues(alpha: 0.2) : Colors.white10,
+      label: Text('${active ? '●' : '○'} $label'),
     );
   }
 }

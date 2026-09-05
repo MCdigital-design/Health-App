@@ -11,6 +11,10 @@ Flutter dashboard you sideload on a Samsung phone. Live HR/PPG, recording, histo
 - Install notes: [`dist/INSTALL.txt`](dist/INSTALL.txt)
 - QA audit: [`apps/verity_dashboard/QA_AUDIT.md`](apps/verity_dashboard/QA_AUDIT.md)
 
+Live recordings stay on the phone as a full-resolution SQLite table (not
+compressed, not uploaded to GitHub, not synced to Polar Flow). Delete a
+session from its detail screen, or clear all recordings in Settings.
+
 Direct download (this repo is public):
 
 https://github.com/MCdigital-design/Health-App/raw/main/dist/verity-dashboard.apk

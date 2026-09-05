@@ -42,7 +42,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final sessions = await LocalDb.instance.getSessions();
     final samples = <String, List<SensorSample>>{};
     for (final s in sessions.take(20)) {
-      samples[s.id] = await LocalDb.instance.getSamples(s.id, limit: 2000);
+      samples[s.id] = await LocalDb.instance.getSamplesWithSignal(
+        s.id,
+        ChartSignal.hr,
+        limit: 2000,
+      );
     }
     if (!mounted) return;
     setState(() {
@@ -103,9 +107,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget _buildSessionCard(RecordingSession session) {
     final samples = _samples[session.id] ?? [];
     final hrSpots = <FlSpot>[];
-    for (var i = 0; i < samples.length; i++) {
-      final hr = samples[i].hr;
-      if (hr != null) hrSpots.add(FlSpot(i.toDouble(), hr.toDouble()));
+    if (samples.isNotEmpty) {
+      final origin = samples.first.timestampMs;
+      for (final sample in samples) {
+        if (sample.hr != null) {
+          hrSpots.add(FlSpot((sample.timestampMs - origin) / 1000.0, sample.hr!.toDouble()));
+        }
+      }
     }
     final hasAnySamples = samples.isNotEmpty;
 

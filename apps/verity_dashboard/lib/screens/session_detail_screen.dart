@@ -1,11 +1,12 @@
 import 'dart:io';
-import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
+import '../charts/chart_math.dart';
 import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
 import '../storage/local_db.dart';
+import '../widgets/interactive_time_chart.dart';
 
 class SessionDetailScreen extends StatefulWidget {
   final RecordingSession session;
@@ -18,6 +19,11 @@ class SessionDetailScreen extends StatefulWidget {
 
 class _SessionDetailScreenState extends State<SessionDetailScreen> {
   List<SensorSample> _samples = [];
+  List<TimeValue> _hr = const [];
+  List<TimeValue> _ppg = const [];
+  List<TimeValue> _acc = const [];
+  List<TimeValue> _gyro = const [];
+  List<TimeValue> _mag = const [];
   SessionSampleCounts _counts = SessionSampleCounts.empty;
   int _estimatedBytes = 0;
   bool _loading = true;
@@ -31,14 +37,27 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
 
   Future<void> _load() async {
     final db = LocalDb.instance;
-    final samples = await db.getSamples(widget.session.id);
-    final counts = await db.getSampleTypeCounts(widget.session.id);
-    final bytes = await db.estimateSessionBytes(widget.session.id);
+    final session = widget.session;
+    final results = await Future.wait([
+      db.getSamples(session.id),
+      db.getSampleTypeCounts(session.id),
+      db.estimateSessionBytes(session.id),
+      db.getChartSeries(sessionId: session.id, signal: ChartSignal.hr, sessionStartMs: session.startTimeMs),
+      db.getChartSeries(sessionId: session.id, signal: ChartSignal.ppg, sessionStartMs: session.startTimeMs),
+      db.getChartSeries(sessionId: session.id, signal: ChartSignal.acc, sessionStartMs: session.startTimeMs),
+      db.getChartSeries(sessionId: session.id, signal: ChartSignal.gyro, sessionStartMs: session.startTimeMs),
+      db.getChartSeries(sessionId: session.id, signal: ChartSignal.mag, sessionStartMs: session.startTimeMs),
+    ]);
     if (!mounted) return;
     setState(() {
-      _samples = samples;
-      _counts = counts;
-      _estimatedBytes = bytes;
+      _samples = results[0] as List<SensorSample>;
+      _counts = results[1] as SessionSampleCounts;
+      _estimatedBytes = results[2] as int;
+      _hr = results[3] as List<TimeValue>;
+      _ppg = results[4] as List<TimeValue>;
+      _acc = results[5] as List<TimeValue>;
+      _gyro = results[6] as List<TimeValue>;
+      _mag = results[7] as List<TimeValue>;
       _loading = false;
     });
   }
@@ -74,8 +93,12 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete session?'),
-        content: const Text('This cannot be undone.'),
+        title: const Text('Delete this session from the phone?'),
+        content: Text(
+          'Removes ${formatBytes(_estimatedBytes)} of full-resolution samples '
+          'from this phone only. Polar Flow and the official Polar app are not '
+          'changed. This cannot be undone.',
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
@@ -92,17 +115,6 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
   Widget build(BuildContext context) {
     final session = widget.session;
     final dateFmt = DateFormat('MMM d, yyyy HH:mm:ss');
-
-    final hrSpots = <FlSpot>[];
-    for (var i = 0; i < _samples.length; i++) {
-      final hr = _samples[i].hr;
-      if (hr != null) hrSpots.add(FlSpot(i.toDouble(), hr.toDouble()));
-    }
-    final ppgSpots = <FlSpot>[];
-    for (var i = 0; i < _samples.length; i++) {
-      final ppg = _samples[i].ppg;
-      if (ppg != null && ppg.isNotEmpty) ppgSpots.add(FlSpot(i.toDouble(), ppg.first.toDouble()));
-    }
 
     return Scaffold(
       appBar: AppBar(
@@ -134,10 +146,15 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                         const SizedBox(height: 8),
                         Text('Started: ${dateFmt.format(DateTime.fromMillisecondsSinceEpoch(session.startTimeMs))}'),
                         Text('Device: ${session.deviceId}'),
-                        Text('Estimated storage: ${_formatBytes(_estimatedBytes)}'),
                       ],
                     ),
                   ),
+                ),
+                const SizedBox(height: 16),
+                _StorageCard(
+                  bytes: _estimatedBytes,
+                  duration: session.duration,
+                  totalSamples: _counts.total,
                 ),
                 const SizedBox(height: 16),
                 Card(
@@ -147,6 +164,12 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Sample breakdown', style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Each number is a full stored row, not a compressed summary. '
+                          'PPG at ~40 Hz for 16 minutes is about 40,000 rows — that is expected.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                         const SizedBox(height: 12),
                         Wrap(
                           spacing: 12,
@@ -161,16 +184,25 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                             _CountChip(label: 'Mag', count: _counts.mag),
                           ],
                         ),
+                        if (_counts.acc == 0 && _counts.gyro == 0 && _counts.mag == 0)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 12),
+                            child: Text(
+                              'Accel / gyro / mag are 0 because this recording never asked '
+                              'the sensor for motion streams — only HR and PPG were started. '
+                              'New recordings turn accelerometer on by default (Settings → '
+                              'Motion sensors). Gyro often needs SDK Mode, which disables HR. '
+                              'Magnetometer is frequently unavailable on Verity Sense.',
+                              style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
+                            ),
+                          ),
                         if (_counts.total > 0 && _counts.hr == 0)
                           const Padding(
                             padding: EdgeInsets.only(top: 12),
                             child: Text(
                               'This session has no HR samples — the heart rate stream was not '
                               'delivering data for its entire duration (most commonly because SDK '
-                              'Mode was on the whole time, which disables HR on Verity Sense). '
-                              'Other signal types were still captured. Check the Live tab for an '
-                              'orange "Heart rate is not active" banner next time this happens — '
-                              'the app now also retries automatically every 20s.',
+                              'Mode was on the whole time, which disables HR on Verity Sense).',
                               style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
                             ),
                           ),
@@ -179,9 +211,50 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _StaticChart(title: 'Heart Rate', color: Colors.redAccent, spots: hrSpots),
+                const _PrivacyCard(),
                 const SizedBox(height: 16),
-                _StaticChart(title: 'PPG (first channel)', color: Colors.blueAccent, spots: ppgSpots),
+                InteractiveTimeChart(
+                  title: 'Heart Rate',
+                  unit: 'bpm',
+                  color: Colors.redAccent,
+                  points: _hr,
+                  emptyLabel: _counts.hr == 0
+                      ? 'No heart-rate samples in this recording'
+                      : 'Heart-rate samples could not be plotted',
+                ),
+                const SizedBox(height: 16),
+                InteractiveTimeChart(
+                  title: 'PPG (first channel)',
+                  unit: 'raw',
+                  color: Colors.blueAccent,
+                  points: _ppg,
+                  emptyLabel: 'No PPG samples in this recording',
+                ),
+                if (_acc.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  InteractiveTimeChart(
+                    title: 'Accelerometer (magnitude)',
+                    unit: 'mg',
+                    color: Colors.tealAccent,
+                    points: _acc,
+                  ),
+                ],
+                if (_gyro.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  InteractiveTimeChart(
+                    title: 'Gyroscope (magnitude)',
+                    color: Colors.amberAccent,
+                    points: _gyro,
+                  ),
+                ],
+                if (_mag.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  InteractiveTimeChart(
+                    title: 'Magnetometer (magnitude)',
+                    color: Colors.purpleAccent,
+                    points: _mag,
+                  ),
+                ],
                 if (_exportedPath != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 16),
@@ -192,6 +265,83 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                   ),
               ],
             ),
+    );
+  }
+}
+
+class _StorageCard extends StatelessWidget {
+  final int bytes;
+  final Duration? duration;
+  final int totalSamples;
+
+  const _StorageCard({
+    required this.bytes,
+    required this.duration,
+    required this.totalSamples,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Storage on this phone', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(
+              '${formatBytes(bytes)}  ·  $totalSamples full-size rows',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              storageProjection(bytes: bytes, duration: duration),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Delete this session with the trash icon, or clear every recording '
+              'under Settings. Uninstalling the app or clearing its Android storage '
+              'also removes the SQLite file.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PrivacyCard extends StatelessWidget {
+  const _PrivacyCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Where this data lives', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(
+              'Live recordings in this app are one-way Bluetooth streams onto the '
+              'phone. They are not written back to the sensor, and they do not sync '
+              'to Polar Flow or the official Polar app. Sessions you record here will '
+              'not appear there.\n\n'
+              'The sensor only keeps its own button-press exercises (recording / '
+              'swimming mode). Those can sync to Polar Flow if the sensor is paired '
+              'with a Polar account — that is a separate pipeline.\n\n'
+              'This app does not upload health data to GitHub. A public repo is the '
+              'wrong place for heart-rate and PPG traces. Share a CSV yourself only '
+              'if you intend to.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -210,55 +360,6 @@ class _CountChip extends StatelessWidget {
   }
 }
 
-class _StaticChart extends StatelessWidget {
-  final String title;
-  final Color color;
-  final List<FlSpot> spots;
-
-  const _StaticChart({required this.title, required this.color, required this.spots});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 12),
-            SizedBox(
-              height: 180,
-              child: spots.isEmpty
-                  ? const Center(child: Text('No data'))
-                  : LineChart(
-                      LineChartData(
-                        gridData: const FlGridData(show: false),
-                        titlesData: const FlTitlesData(
-                          bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                          topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                          rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                        ),
-                        borderData: FlBorderData(show: false),
-                        lineBarsData: [
-                          LineChartBarData(
-                            spots: spots,
-                            isCurved: true,
-                            color: color,
-                            barWidth: 2,
-                            dotData: const FlDotData(show: false),
-                          ),
-                        ],
-                      ),
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 String _formatDuration(Duration d) {
   final h = d.inHours;
   final m = d.inMinutes % 60;
@@ -266,10 +367,4 @@ String _formatDuration(Duration d) {
   if (h > 0) return '${h}h ${m}m';
   if (m > 0) return '${m}m ${s}s';
   return '${s}s';
-}
-
-String _formatBytes(int bytes) {
-  if (bytes < 1024) return '$bytes B';
-  if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-  return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
 }

@@ -1,5 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import '../charts/chart_math.dart';
 import '../models/time_series_buffer.dart';
 
 /// A time-anchored line chart. Unlike a naive "append and trim" chart, the
@@ -86,21 +87,34 @@ class LiveChart extends StatelessWidget {
                               leftTitles: AxisTitles(
                                 sideTitles: SideTitles(
                                   showTitles: true,
-                                  reservedSize: 36,
-                                  getTitlesWidget: (value, meta) => Text(
-                                    value.toStringAsFixed(0),
-                                    style: const TextStyle(fontSize: 10, color: Colors.white54),
+                                  reservedSize: 48,
+                                  interval: yRange != null
+                                      ? niceStep(yRange!.$2 - yRange!.$1, tickCount: 4)
+                                      : null,
+                                  getTitlesWidget: (value, meta) => SideTitleWidget(
+                                    axisSide: meta.axisSide,
+                                    space: 6,
+                                    child: Text(
+                                      formatAxisNumber(value),
+                                      maxLines: 1,
+                                      style: const TextStyle(fontSize: 10, color: Colors.white70),
+                                    ),
                                   ),
                                 ),
                               ),
                               bottomTitles: AxisTitles(
                                 sideTitles: SideTitles(
                                   showTitles: true,
-                                  reservedSize: 20,
+                                  reservedSize: 22,
                                   interval: windowSeconds / 3,
-                                  getTitlesWidget: (value, meta) => Text(
-                                    '${value.toStringAsFixed(0)}s',
-                                    style: const TextStyle(fontSize: 10, color: Colors.white54),
+                                  getTitlesWidget: (value, meta) => SideTitleWidget(
+                                    axisSide: meta.axisSide,
+                                    space: 4,
+                                    child: Text(
+                                      formatElapsed(value),
+                                      maxLines: 1,
+                                      style: const TextStyle(fontSize: 10, color: Colors.white70),
+                                    ),
                                   ),
                                 ),
                               ),

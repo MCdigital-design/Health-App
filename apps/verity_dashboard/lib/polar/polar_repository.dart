@@ -18,6 +18,9 @@ class PolarFeatureTimeoutException implements Exception {
 
 const _prefAutoReconnect = 'autoReconnect';
 const _prefLastDeviceId = 'lastDeviceId';
+const _prefRecordAccel = 'recordAccelerometer';
+const _prefRecordGyro = 'recordGyroscope';
+const _prefRecordMag = 'recordMagnetometer';
 
 /// How long a stream can go without a new sample before it's considered
 /// stalled and force-restarted. Set well above normal HR cadence (~1/s) and
@@ -104,6 +107,19 @@ class PolarRepository {
 
   bool get isHrActive => _hrStreaming;
   bool get isPpgActive => _ppgStreaming;
+  bool get isAccActive => _accStreaming;
+  bool get isGyroActive => _gyroStreaming;
+  bool get isMagActive => _magStreaming;
+
+  bool _recordAccel = true;
+  bool _recordGyro = false;
+  bool _recordMag = false;
+  bool get recordAccel => _recordAccel;
+  bool get recordGyro => _recordGyro;
+  bool get recordMag => _recordMag;
+
+  bool _gyroUnsupported = false;
+  bool _magUnsupported = false;
 
   bool _hrStartInProgress = false;
   bool _ppgStartInProgress = false;
@@ -152,6 +168,7 @@ class PolarRepository {
         unawaited(startHrStreaming());
       }
       unawaited(startPpgStreaming());
+      unawaited(startEnabledMotionStreams(silent: true));
     });
 
     _polar.deviceConnecting.listen((device) {
@@ -162,8 +179,10 @@ class PolarRepository {
       if (_connectedDeviceId == event.info.deviceId) {
         _connectedDeviceId = null;
       }
-      _readyFeatures.remove(event.info.deviceId);
-      _cancelAllStreamSubs();
+    _readyFeatures.remove(event.info.deviceId);
+    _gyroUnsupported = false;
+    _magUnsupported = false;
+    _cancelAllStreamSubs();
       _stopWatchdog();
       _connectionStateController.add('disconnected:${event.info.deviceId}');
 
@@ -182,6 +201,65 @@ class PolarRepository {
     final prefs = await SharedPreferences.getInstance();
     _autoReconnectEnabled = prefs.getBool(_prefAutoReconnect) ?? false;
     _lastDeviceId = prefs.getString(_prefLastDeviceId);
+    _recordAccel = prefs.getBool(_prefRecordAccel) ?? true;
+    _recordGyro = prefs.getBool(_prefRecordGyro) ?? false;
+    _recordMag = prefs.getBool(_prefRecordMag) ?? false;
+  }
+
+  Future<void> setRecordAccel(bool value) async {
+    _recordAccel = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefRecordAccel, value);
+    if (isConnected) {
+      if (value) {
+        await startAccStreaming(silent: true);
+      } else {
+        await _accSub?.cancel();
+        _accStreaming = false;
+      }
+    }
+  }
+
+  Future<void> setRecordGyro(bool value) async {
+    _recordGyro = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefRecordGyro, value);
+    if (isConnected) {
+      if (value) {
+        await startGyroStreaming(silent: true);
+      } else {
+        await _gyroSub?.cancel();
+        _gyroStreaming = false;
+      }
+    }
+  }
+
+  Future<void> setRecordMag(bool value) async {
+    _recordMag = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefRecordMag, value);
+    if (isConnected) {
+      if (value) {
+        await startMagnetometerStreaming(silent: true);
+      } else {
+        await _magSub?.cancel();
+        _magStreaming = false;
+      }
+    }
+  }
+
+  Future<void> startEnabledMotionStreams({bool silent = false}) async {
+    if (_recordAccel) unawaited(startAccStreaming(silent: silent));
+    if (_recordGyro) unawaited(startGyroStreaming(silent: silent));
+    if (_recordMag) unawaited(startMagnetometerStreaming(silent: silent));
+  }
+
+  String get activeRecordingTypes {
+    final types = <String>['hr', 'ppg'];
+    if (_accStreaming) types.add('acc');
+    if (_gyroStreaming) types.add('gyro');
+    if (_magStreaming) types.add('mag');
+    return types.join(',');
   }
 
   Future<void> setAutoReconnect(bool value) async {
@@ -381,6 +459,9 @@ class PolarRepository {
       _errorController.add('Could not change SDK Mode: $e');
     }
 
+    _gyroUnsupported = false;
+    _magUnsupported = false;
+
     final actual = await refreshSdkModeState();
     if (actual != enable) {
       _errorController.add(
@@ -512,12 +593,12 @@ class PolarRepository {
     );
   }
 
-  Future<void> startAccStreaming() async {
+  Future<void> startAccStreaming({bool silent = false}) async {
     if (_connectedDeviceId == null || _accStreaming) return;
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      _errorController.add(e.toString());
+      (silent ? _statusController : _errorController).add(e.toString());
       return;
     }
     final deviceId = _connectedDeviceId;
@@ -536,18 +617,20 @@ class PolarRepository {
       },
       onError: (Object e) {
         _accStreaming = false;
-        _errorController.add('Accelerometer stream error: $e');
+        (silent ? _statusController : _errorController).add(
+          'Accelerometer stream error: $e',
+        );
       },
       onDone: () => _accStreaming = false,
     );
   }
 
-  Future<void> startGyroStreaming() async {
-    if (_connectedDeviceId == null || _gyroStreaming) return;
+  Future<void> startGyroStreaming({bool silent = false}) async {
+    if (_connectedDeviceId == null || _gyroStreaming || _gyroUnsupported) return;
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      _errorController.add(e.toString());
+      (silent ? _statusController : _errorController).add(e.toString());
       return;
     }
     final deviceId = _connectedDeviceId;
@@ -566,18 +649,22 @@ class PolarRepository {
       },
       onError: (Object e) {
         _gyroStreaming = false;
-        _errorController.add('Gyroscope stream error: $e');
+        _gyroUnsupported = true;
+        (silent ? _statusController : _errorController).add(
+          'Gyroscope is not available right now. On Verity Sense it usually '
+          'needs SDK Mode, which turns off heart rate.',
+        );
       },
       onDone: () => _gyroStreaming = false,
     );
   }
 
-  Future<void> startMagnetometerStreaming() async {
-    if (_connectedDeviceId == null || _magStreaming) return;
+  Future<void> startMagnetometerStreaming({bool silent = false}) async {
+    if (_connectedDeviceId == null || _magStreaming || _magUnsupported) return;
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      _errorController.add(e.toString());
+      (silent ? _statusController : _errorController).add(e.toString());
       return;
     }
     final deviceId = _connectedDeviceId;
@@ -596,7 +683,11 @@ class PolarRepository {
       },
       onError: (Object e) {
         _magStreaming = false;
-        _errorController.add('Magnetometer stream error: $e');
+        _magUnsupported = true;
+        (silent ? _statusController : _errorController).add(
+          'Magnetometer is not available on this sensor. Verity Sense often '
+          'exposes only accelerometer (and gyro in SDK Mode).',
+        );
       },
       onDone: () => _magStreaming = false,
     );
@@ -632,14 +723,15 @@ class PolarRepository {
     );
   }
 
-  Future<String> startLocalSession(String name, String dataTypes) async {
+  Future<String> startLocalSession(String name, [String? dataTypes]) async {
+    await startEnabledMotionStreams(silent: true);
     final sessionId = _uuid.v4();
     final session = RecordingSession(
       id: sessionId,
       deviceId: _connectedDeviceId ?? 'unknown',
       name: name,
       startTimeMs: DateTime.now().millisecondsSinceEpoch,
-      dataTypes: dataTypes,
+      dataTypes: dataTypes ?? activeRecordingTypes,
       source: SessionSource.liveApp,
     );
     await _db.insertSession(session);
@@ -684,6 +776,11 @@ class PolarRepository {
 
   Future<void> deleteSession(String sessionId) async {
     await _db.deleteSession(sessionId);
+    _sessionsChangedController.add(null);
+  }
+
+  Future<void> deleteAllSessions() async {
+    await _db.deleteAllSessions();
     _sessionsChangedController.add(null);
   }
 

@@ -122,6 +122,63 @@ void main() {
       expect(await db.sessionExistsForExternalId(id), isFalse);
     });
 
+    test('getChartSeries still finds HR when PPG timestamps sort first', () async {
+      final db = LocalDb.instance;
+      final id = 'test-hr-not-lost-${_uuid.v4()}';
+      const start = 1_700_000_000_000;
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'MixedClocks',
+        startTimeMs: start,
+        dataTypes: 'hr,ppg',
+      ));
+      final samples = <SensorSample>[
+        for (var i = 0; i < 6000; i++)
+          SensorSample(timestampMs: 946684800000 + i, ppg: [300000 + i]),
+        for (var i = 0; i < 20; i++)
+          SensorSample(timestampMs: start + i * 1000, hr: 60 + i),
+      ];
+      await db.insertSamples(id, samples);
+
+      final limited = await db.getSamples(id, limit: 5000);
+      expect(limited.every((s) => s.hr == null), isTrue);
+
+      final hr = await db.getChartSeries(
+        sessionId: id,
+        signal: ChartSignal.hr,
+        sessionStartMs: start,
+      );
+      expect(hr.length, 20);
+      expect(hr.first.value, 60);
+
+      final ppg = await db.getChartSeries(
+        sessionId: id,
+        signal: ChartSignal.ppg,
+        sessionStartMs: start,
+      );
+      expect(ppg.length, 6000);
+      expect(ppg.first.seconds, 0);
+
+      await db.deleteSession(id);
+    });
+
+    test('deleteAllSessions clears every session and sample', () async {
+      final db = LocalDb.instance;
+      final id = 'test-all-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'All',
+        startTimeMs: 1000,
+        dataTypes: 'hr',
+      ));
+      await db.insertSamples(id, [SensorSample(timestampMs: 1, hr: 70)]);
+      await db.deleteAllSessions();
+      expect(await db.getSession(id), isNull);
+      expect(await db.getSampleCount(id), 0);
+    });
+
     test('deleteSession cascades to samples', () async {
       final db = LocalDb.instance;
       final id = 'test-cascade-${_uuid.v4()}';

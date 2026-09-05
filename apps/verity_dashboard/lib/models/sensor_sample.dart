@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 class SensorSample {
   final int timestampMs;
   final int? hr;
@@ -28,6 +30,23 @@ class SensorSample {
       'gyro': gyro?.join(','),
       'mag': mag?.join(','),
     };
+  }
+
+  double? get ppgChannel0 {
+    if (ppg == null || ppg!.isEmpty) return null;
+    return ppg!.first.toDouble();
+  }
+
+  double? get accMagnitude => _magnitude(acc);
+  double? get gyroMagnitude => _magnitude(gyro);
+  double? get magMagnitude => _magnitude(mag);
+
+  static double? _magnitude(List<double>? xyz) {
+    if (xyz == null || xyz.length < 3) return null;
+    final x = xyz[0];
+    final y = xyz[1];
+    final z = xyz[2];
+    return math.sqrt(x * x + y * y + z * z);
   }
 
   static SensorSample fromMap(Map<String, dynamic> map) {

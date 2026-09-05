@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/recording_session.dart';
+import '../charts/chart_math.dart';
 import '../polar/accesslink_service.dart';
 import '../polar/polar_repository.dart';
 import '../storage/local_db.dart';
@@ -18,6 +19,7 @@ class RecordingsScreen extends StatefulWidget {
 class _RecordingsScreenState extends State<RecordingsScreen> {
   final _accessLink = AccessLinkService();
   List<RecordingSession> _sessions = [];
+  Map<String, int> _sessionBytes = {};
   List<dynamic> _deviceExercises = [];
   bool _loading = false;
   bool _polarFlowLinked = false;
@@ -50,7 +52,13 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
 
   Future<void> _loadSessions() async {
     final sessions = await LocalDb.instance.getSessions();
-    if (mounted) setState(() => _sessions = sessions);
+    final bytes = await LocalDb.instance.estimateAllSessionBytes();
+    if (mounted) {
+      setState(() {
+        _sessions = sessions;
+        _sessionBytes = bytes;
+      });
+    }
   }
 
   Future<void> _scanDeviceExercises() async {
@@ -210,8 +218,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                   Text('All sessions on phone', style: Theme.of(context).textTheme.titleLarge),
                   const SizedBox(height: 4),
                   Text(
-                    'Everything captured live through this app, synced from the sensor, or '
-                    'imported from Polar Flow. Tap a session for details.',
+                    'Live recordings stay on this phone only. They do not appear in Polar Flow '
+                    'or the official Polar app. Tap a session for charts, storage, and delete.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                   const SizedBox(height: 8),
@@ -229,7 +237,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                             title: Text(s.name),
                             subtitle: Text(
                               '${dateFmt.format(DateTime.fromMillisecondsSinceEpoch(s.startTimeMs))} • '
-                              '${s.sampleCount} samples',
+                              '${s.sampleCount} samples'
+                              '${_sessionBytes[s.id] != null ? ' • ${formatBytes(_sessionBytes[s.id]!)}' : ''}',
                             ),
                             trailing: Chip(
                               label: Text(s.source.label, style: const TextStyle(fontSize: 11)),

@@ -1,7 +1,20 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import '../charts/chart_math.dart';
 import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
+
+enum ChartSignal { hr, ppg, acc, gyro, mag }
+
+extension ChartSignalColumn on ChartSignal {
+  String get column => switch (this) {
+        ChartSignal.hr => 'hr',
+        ChartSignal.ppg => 'ppg',
+        ChartSignal.acc => 'acc',
+        ChartSignal.gyro => 'gyro',
+        ChartSignal.mag => 'mag',
+      };
+}
 
 class LocalDb {
   static final LocalDb instance = LocalDb._internal();
@@ -106,7 +119,11 @@ class LocalDb {
     await batch.commit(noResult: true);
   }
 
-  Future<List<SensorSample>> getSamples(String sessionId, {int limit = 5000}) async {
+  /// Full session rows. Do not silently cap this — the previous default of
+  /// 5,000 dropped later HR rows whenever PPG (tens of Hz) filled the
+  /// first page, which is why session detail showed "No data" for heart
+  /// rate on a recording that had hundreds of HR samples.
+  Future<List<SensorSample>> getSamples(String sessionId, {int? limit}) async {
     final db = await database;
     final maps = await db.query(
       'samples',
@@ -116,6 +133,45 @@ class LocalDb {
       limit: limit,
     );
     return maps.map((m) => SensorSample.fromMap(m)).toList();
+  }
+
+  Future<List<SensorSample>> getSamplesWithSignal(
+    String sessionId,
+    ChartSignal signal, {
+    int? limit,
+  }) async {
+    final db = await database;
+    final column = signal.column;
+    final maps = await db.query(
+      'samples',
+      where: 'session_id = ? AND $column IS NOT NULL',
+      whereArgs: [sessionId],
+      orderBy: 'timestamp_ms ASC',
+      limit: limit,
+    );
+    return maps.map((m) => SensorSample.fromMap(m)).toList();
+  }
+
+  /// Chart-ready elapsed-second series for one signal. Queries only that
+  /// column so a 40k-row PPG dump cannot hide 1 Hz HR.
+  Future<List<TimeValue>> getChartSeries({
+    required String sessionId,
+    required ChartSignal signal,
+    required int sessionStartMs,
+  }) async {
+    final samples = await getSamplesWithSignal(sessionId, signal);
+    final pairs = <(int, double)>[];
+    for (final s in samples) {
+      final value = switch (signal) {
+        ChartSignal.hr => s.hr?.toDouble(),
+        ChartSignal.ppg => s.ppgChannel0,
+        ChartSignal.acc => s.accMagnitude,
+        ChartSignal.gyro => s.gyroMagnitude,
+        ChartSignal.mag => s.magMagnitude,
+      };
+      if (value != null) pairs.add((s.timestampMs, value));
+    }
+    return elapsedSeries(samples: pairs, sessionStartMs: sessionStartMs);
   }
 
   Future<int> getSampleCount(String sessionId) async {
@@ -189,5 +245,33 @@ class LocalDb {
     final db = await database;
     await db.delete('samples', where: 'session_id = ?', whereArgs: [sessionId]);
     await db.delete('sessions', where: 'id = ?', whereArgs: [sessionId]);
+  }
+
+  Future<void> deleteAllSessions() async {
+    final db = await database;
+    await db.delete('samples');
+    await db.delete('sessions');
+  }
+
+  /// On-disk estimate for every session, one query.
+  Future<Map<String, int>> estimateAllSessionBytes() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT
+        session_id,
+        COALESCE(SUM(LENGTH(CAST(hr AS TEXT))), 0) +
+        COALESCE(SUM(LENGTH(ppi)), 0) +
+        COALESCE(SUM(LENGTH(ppg)), 0) +
+        COALESCE(SUM(LENGTH(acc)), 0) +
+        COALESCE(SUM(LENGTH(gyro)), 0) +
+        COALESCE(SUM(LENGTH(mag)), 0) +
+        (COUNT(*) * 16) as bytes
+      FROM samples
+      GROUP BY session_id
+    ''');
+    return {
+      for (final r in rows)
+        (r['session_id'] as String): (r['bytes'] as int? ?? 0),
+    };
   }
 }

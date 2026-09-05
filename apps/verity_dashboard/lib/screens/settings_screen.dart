@@ -16,6 +16,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _connectedDeviceId;
   bool _sdkMode = false;
   bool _autoReconnect = false;
+  bool _recordAccel = true;
+  bool _recordGyro = false;
+  bool _recordMag = false;
   bool _scanning = false;
   StreamSubscription? _deviceSub;
   StreamSubscription? _connSub;
@@ -40,6 +43,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _connectedDeviceId = repo.connectedDeviceId;
     _sdkMode = repo.isSdkModeOn;
     _autoReconnect = repo.autoReconnectEnabled;
+    _recordAccel = repo.recordAccel;
+    _recordGyro = repo.recordGyro;
+    _recordMag = repo.recordMag;
     _deviceSub = repo.deviceFoundStream.listen((device) {
       if (!_foundDevices.any((d) => d.deviceId == device.deviceId)) {
         setState(() => _foundDevices.add(device));
@@ -296,6 +302,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 16),
           Card(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: const Text('Record accelerometer'),
+                  subtitle: const Text('On by default. Adds ~15 MB/hour at 50 Hz. This is the motion sensor Verity Sense actually exposes in normal mode.'),
+                  value: _recordAccel,
+                  onChanged: (v) async {
+                    setState(() => _recordAccel = v);
+                    await repo.setRecordAccel(v);
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('Record gyroscope'),
+                  subtitle: const Text('Usually needs SDK Mode, which turns off heart rate. Leave off unless you need raw rotation.'),
+                  value: _recordGyro,
+                  onChanged: (v) async {
+                    setState(() => _recordGyro = v);
+                    await repo.setRecordGyro(v);
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('Record magnetometer'),
+                  subtitle: const Text('Often unavailable on Verity Sense. Safe to leave off.'),
+                  value: _recordMag,
+                  onChanged: (v) async {
+                    setState(() => _recordMag = v);
+                    await repo.setRecordMag(v);
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -390,9 +430,57 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text('Storage and privacy', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Recordings stay in a SQLite file on this phone. They are not uploaded '
+                    'to GitHub and they do not sync to Polar Flow. Heart-rate and PPG are '
+                    'health data — do not put them in a public repository.\n\n'
+                    'Delete one session from its detail screen (trash icon), or remove every '
+                    'recording below. Uninstalling the app also deletes the database.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Delete every recording on this phone?'),
+                          content: const Text(
+                            'This only clears Verity Dashboard storage. Polar Flow and the '
+                            'official Polar app are not changed. This cannot be undone.',
+                          ),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete all')),
+                          ],
+                        ),
+                      );
+                      if (ok != true) return;
+                      await repo.deleteAllSessions();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('All local recordings deleted')),
+                      );
+                    },
+                    icon: const Icon(Icons.delete_sweep),
+                    label: const Text('Delete all recordings on this phone'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text('About', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('Verity Dashboard v1.1.0'),
+                  const Text('Verity Dashboard v1.2.0'),
                   const Text('Offline-first Polar Verity Sense client'),
                 ],
               ),
