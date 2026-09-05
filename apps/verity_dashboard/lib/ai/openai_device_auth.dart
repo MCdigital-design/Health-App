@@ -246,17 +246,32 @@ class OpenAiDeviceAuth {
         : int.tryParse('${json['expires_in']}') ?? 3600;
     final idToken = json['id_token']?.toString();
     final claims = jwtClaims(idToken) ?? jwtClaims(access) ?? const {};
-    final auth = claims['https://api.openai.com/auth'];
-    final authMap = auth is Map<String, dynamic> ? auth : const <String, dynamic>{};
+    final identity = chatgptIdentity(claims);
     return OpenAiSession(
       accessToken: access,
       refreshToken: refresh,
       idToken: idToken,
       expiresAtMs: DateTime.now().millisecondsSinceEpoch + expiresIn * 1000,
-      accountId: authMap['chatgpt_account_id']?.toString(),
-      email: claims['email']?.toString(),
-      planType: authMap['chatgpt_plan_type']?.toString(),
+      accountId: identity.accountId,
+      email: identity.email,
+      planType: identity.planType,
     );
+  }
+
+  static ({String? accountId, String? email, String? planType}) chatgptIdentity(
+    Map<String, dynamic> claims,
+  ) {
+    Map<String, dynamic>? asMap(Object? value) =>
+        value is Map<String, dynamic> ? value : null;
+    final auth = asMap(claims['https://api.openai.com/auth']);
+    final profile = asMap(claims['https://api.openai.com/profile']);
+    final accountId = auth?['chatgpt_account_id']?.toString() ??
+        auth?['account_id']?.toString() ??
+        claims['chatgpt_account_id']?.toString();
+    final email = claims['email']?.toString() ?? profile?['email']?.toString();
+    final planType = auth?['chatgpt_plan_type']?.toString() ??
+        claims['chatgpt_plan_type']?.toString();
+    return (accountId: accountId, email: email, planType: planType);
   }
 
   static Map<String, dynamic>? jwtClaims(String? token) {
