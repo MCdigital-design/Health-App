@@ -12,9 +12,18 @@ installed a version, just install this one on top - no need to uninstall.
 4. If Play Protect warns: More details -> Install anyway.
 
 Requires Android 8.0 or newer. Release-signed (not debug/testOnly).
-SHA256: f44714edfe117c16bf0793872d90316bcc4083edac8c77af81f200b6d4f914b3
+SHA256: 575d465567ac3cbcee428c706f5e8658d239f9a03707304c6d59962235249742
 
-WHAT'S NEW IN THIS BUILD (v1.2.0 — session charts, motion, storage):
+WHAT'S NEW IN THIS BUILD (v1.2.1 — Live axes and PPG already-running):
+
+- Live timeframe chips name the window (Real-time / 30s / 2m / 10m / 30m / 2h).
+- Chart Y ticks are even numbers. The exact last sample sits in the colored chip.
+- Live X axis uses now / -10m, not -600s.
+- App bar shows the connected device id.
+- PPG no longer restarts every few seconds just because Polar timestamps
+  are on a different clock (that was the ERROR_ALREADY_IN_STATE overlay).
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.0 — session charts, motion, storage):
 
 - Session Heart Rate no longer shows "No data" when HR rows exist (was
   hidden behind the first 5,000 PPG rows).
