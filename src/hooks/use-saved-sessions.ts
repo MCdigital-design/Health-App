@@ -1,8 +1,11 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { SESSIONS_CHANGED, loadSessions } from "@/lib/storage";
-import type { SavedSession } from "@/lib/types";
+import {
+  EMPTY_SESSIONS,
+  SESSIONS_CHANGED,
+  loadSessions,
+} from "@/lib/storage";
 
 function subscribe(onStoreChange: () => void) {
   window.addEventListener(SESSIONS_CHANGED, onStoreChange);
@@ -21,6 +24,10 @@ function serverNotMounted() {
   return false;
 }
 
+function getServerSessions() {
+  return EMPTY_SESSIONS;
+}
+
 export function useSavedSessions() {
   const ready = useSyncExternalStore(
     () => () => undefined,
@@ -30,8 +37,8 @@ export function useSavedSessions() {
   const sessions = useSyncExternalStore(
     subscribe,
     loadSessions,
-    (): SavedSession[] => [],
+    getServerSessions,
   );
 
-  return { sessions: ready ? sessions : [], ready };
+  return { sessions: ready ? sessions : EMPTY_SESSIONS, ready };
 }
