@@ -1,0 +1,44 @@
+Install this APK on a Samsung phone.
+
+Home for this app: https://github.com/MCdigital-design/Health-App
+Moved from: https://github.com/MCdigital-design/alphatrend-mt5-qa/pull/1
+
+This is an UPDATE (same signing key as previous builds). If you already
+installed a version, just install this one on top - no need to uninstall.
+
+1. Copy verity-dashboard.apk to the phone.
+2. Open it with My Files (not Chrome if possible).
+3. Allow Install unknown apps for My Files, if asked again.
+4. If Play Protect warns: More details -> Install anyway.
+
+Requires Android 8.0 or newer. Release-signed (not debug/testOnly).
+SHA256: 3553f8ead2deceb61bf5f1d6a0d231fef432872f071987e850e700a210c27092
+
+WHAT'S NEW IN THIS BUILD (fixes a 12-minute-recording-with-zero-HR bug):
+
+- Fixed a real root cause: toggling SDK Mode while a stream (e.g. PPG)
+  was already running caused the sensor to silently reject the mode
+  change (Polar's own documented INVALID_STATE behavior). The app now
+  stops all active streams first, changes the mode, re-verifies the
+  sensor's actual state afterward (instead of assuming the request
+  worked), and restarts whatever was running before.
+- Added continuous auto-retry for Heart Rate (and PPG): if a stream never
+  successfully starts on the first attempt, or stops for any reason, the
+  app now retries every 20 seconds automatically instead of giving up
+  after a single failed attempt.
+- Added a persistent orange "Heart rate is not active" banner on the
+  Live tab with a manual Retry button, so this is now visible immediately
+  instead of only a brief, easy-to-miss message.
+
+Previous build's fixes are still included:
+- Chart flatlining/flickering fixes, timeframe selector, adaptive charts
+- Recordings tab auto-refresh (sessions were never actually lost, just
+  not shown without a manual reload)
+- Session detail view with per-signal sample counts and CSV export
+- Optional Polar Flow (cloud) import for historical exercises
+
+If Heart Rate still shows nothing after connecting: open Settings and
+check "SDK Mode" is off, then check the Live tab for the new "Heart rate
+is not active" banner and tap Retry.
+
+Full audit and manual test checklist: apps/verity_dashboard/QA_AUDIT.md

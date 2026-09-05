@@ -1,47 +1,37 @@
-# Polar Verity Sense
+# Health-App
 
-Dedicated home for Polar Verity Sense work, kept separate from AlphaTrend.
+Dedicated home for Polar Verity Sense work, moved out of [alphatrend-mt5-qa#1](https://github.com/MCdigital-design/alphatrend-mt5-qa/pull/1). This repository is not an AlphaTrend / MT5 project.
 
-This repo is a browser companion for the Polar Verity Sense optical heart-rate sensor. Pair the armband over Web Bluetooth (standard Heart Rate + RR intervals), or run a demo stream when no sensor is attached. Sessions stay in the browser and can be exported as CSV.
+## Polar Verity Sense Android app (primary)
 
-## Why this repo exists
+Flutter dashboard you sideload on a Samsung phone. Live HR/PPG, recording, history, CSV export, optional Polar Flow import. No Play Store.
 
-Polar Verity Sense work does not belong in the AlphaTrend repository. This project is the place to host that sensor work on its own.
+- App source: [`apps/verity_dashboard`](apps/verity_dashboard)
+- Sideload APK: [`dist/verity-dashboard.apk`](dist/verity-dashboard.apk) (28 MB, SHA256 `3553f8ead2deceb61bf5f1d6a0d231fef432872f071987e850e700a210c27092`)
+- Install notes: [`dist/INSTALL.txt`](dist/INSTALL.txt)
+- QA audit: [`apps/verity_dashboard/QA_AUDIT.md`](apps/verity_dashboard/QA_AUDIT.md)
 
-## Run locally
+Direct download (this repo is public):
+
+https://github.com/MCdigital-design/Health-App/raw/main/dist/verity-dashboard.apk
+
+Confirm the file is about **28 MB** before installing. Then open it from **My Files**, not Chrome.
+
+```bash
+cd apps/verity_dashboard
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release
+```
+
+## Browser companion (secondary)
+
+A Next.js Web Bluetooth dashboard for desktop Chrome/Edge. Demo mode works without a sensor.
 
 ```bash
 npm install
 npm run dev
 ```
 
-The app listens on [http://127.0.0.1:43147](http://127.0.0.1:43147).
-
-## Using a real Polar Verity Sense
-
-1. Open the app in Chrome or Edge (Web Bluetooth is required).
-2. Wear the sensor and put it in **sensor / heart mode**.
-3. Click **Connect Verity Sense** and pick the Polar device from the browser picker.
-4. Stop the session when you are done. It appears under **Sessions**.
-
-Web Bluetooth only works on `https` or `localhost` / `127.0.0.1`. If the picker is unavailable, use **Start demo**.
-
-## What is stored
-
-Sessions are written to `localStorage` in this browser only. Nothing is uploaded. There is no backend and no Polar Flow login.
-
-## Scripts
-
-| Command | Purpose |
-| --- | --- |
-| `npm run dev` | Development server on port 43147 |
-| `npm run build` | Production build |
-| `npm run start` | Serve the production build |
-| `npm run lint` | ESLint |
-
-## Polar features this slice uses
-
-- BLE Heart Rate service (`0x180D`) for BPM
-- RR intervals when the sensor includes them in the HR measurement
-- Battery service when the device exposes it
-- Demo mode that synthesizes HR + RR so the UI can be used without hardware
+Listens on [http://127.0.0.1:43147](http://127.0.0.1:43147).
