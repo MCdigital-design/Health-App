@@ -22,6 +22,7 @@ const _prefLastDeviceId = 'lastDeviceId';
 const _prefRecordAccel = 'recordAccelerometer';
 const _prefRecordGyro = 'recordGyroscope';
 const _prefRecordMag = 'recordMagnetometer';
+const _prefRecordPpi = 'recordPpi';
 
 /// How long a stream can go without a new sample before it's considered
 /// stalled and force-restarted. Set well above normal HR cadence (~1/s) and
@@ -109,16 +110,19 @@ class PolarRepository {
 
   bool get isHrActive => _hrStreaming;
   bool get isPpgActive => _ppgStreaming;
+  bool get isPpiActive => _ppiStreaming;
   bool get isAccActive => _accStreaming;
   bool get isGyroActive => _gyroStreaming;
   bool get isMagActive => _magStreaming;
 
   bool _recordAccel = true;
-  bool _recordGyro = false;
-  bool _recordMag = false;
+  bool _recordGyro = true;
+  bool _recordMag = true;
+  bool _recordPpi = true;
   bool get recordAccel => _recordAccel;
   bool get recordGyro => _recordGyro;
   bool get recordMag => _recordMag;
+  bool get recordPpi => _recordPpi;
 
   bool _gyroUnsupported = false;
   bool _magUnsupported = false;
@@ -170,11 +174,7 @@ class PolarRepository {
       // Auto-start both streams immediately on connect so live data shows
       // up without requiring a manual tap. HR is skipped when SDK Mode is
       // on, since Verity Sense does not support HR in that mode.
-      if (!sdkOn) {
-        unawaited(startHrStreaming());
-      }
-      unawaited(startPpgStreaming());
-      unawaited(startEnabledMotionStreams(silent: true));
+      unawaited(startAllAvailableStreams(silent: true));
     });
 
     _polar.deviceConnecting.listen((device) {
@@ -208,8 +208,9 @@ class PolarRepository {
     _autoReconnectEnabled = prefs.getBool(_prefAutoReconnect) ?? false;
     _lastDeviceId = prefs.getString(_prefLastDeviceId);
     _recordAccel = prefs.getBool(_prefRecordAccel) ?? true;
-    _recordGyro = prefs.getBool(_prefRecordGyro) ?? false;
-    _recordMag = prefs.getBool(_prefRecordMag) ?? false;
+    _recordGyro = prefs.getBool(_prefRecordGyro) ?? true;
+    _recordMag = prefs.getBool(_prefRecordMag) ?? true;
+    _recordPpi = prefs.getBool(_prefRecordPpi) ?? true;
   }
 
   Future<void> setRecordAccel(bool value) async {
@@ -254,14 +255,59 @@ class PolarRepository {
     }
   }
 
+  Future<void> setRecordPpi(bool value) async {
+    _recordPpi = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefRecordPpi, value);
+    if (!isConnected || _sdkModeEnabled) return;
+    if (value) {
+      await startPpiStreaming(silent: true);
+    } else {
+      await stopPpiStreaming();
+    }
+  }
+
+  /// Every Polar Verity Sense online stream that is available *and* does
+  /// not require SDK Mode (which disables HR/PPI). Official list:
+  /// HR, PPG, PPI, ACC (~52 Hz), gyro (~52 Hz), magnetometer.
+  /// ECG / temperature / pressure / GPS are not on this sensor.
+  Future<void> startAllAvailableStreams({bool silent = false}) async {
+    Set<PolarDataType> available = {};
+    final id = _connectedDeviceId;
+    if (id != null) {
+      try {
+        available = await _polar.getAvailableOnlineStreamDataTypes(id);
+      } catch (_) {
+        // Older firmware or plugin gaps — start the documented set anyway.
+      }
+    }
+    bool offers(PolarDataType type) =>
+        available.isEmpty || available.contains(type);
+
+    if (!_sdkModeEnabled) {
+      unawaited(startHrStreaming(silent: silent));
+    }
+    if (offers(PolarDataType.ppg)) {
+      unawaited(startPpgStreaming(silent: silent));
+    }
+    if (_recordAccel && offers(PolarDataType.acc)) {
+      unawaited(startAccStreaming(silent: silent));
+    }
+    if (_recordGyro && offers(PolarDataType.gyro)) {
+      unawaited(startGyroStreaming(silent: silent));
+    }
+    if (_recordMag && offers(PolarDataType.magnetometer)) {
+      unawaited(startMagnetometerStreaming(silent: silent));
+    }
+  }
+
   Future<void> startEnabledMotionStreams({bool silent = false}) async {
-    if (_recordAccel) unawaited(startAccStreaming(silent: silent));
-    if (_recordGyro) unawaited(startGyroStreaming(silent: silent));
-    if (_recordMag) unawaited(startMagnetometerStreaming(silent: silent));
+    await startAllAvailableStreams(silent: silent);
   }
 
   String get activeRecordingTypes {
     final types = <String>['hr', 'ppg'];
+    if (_ppiStreaming) types.add('ppi');
     if (_accStreaming) types.add('acc');
     if (_gyroStreaming) types.add('gyro');
     if (_magStreaming) types.add('mag');
@@ -685,8 +731,8 @@ class PolarRepository {
         _gyroStreaming = false;
         _gyroUnsupported = true;
         (silent ? _statusController : _errorController).add(
-          'Gyroscope is not available right now. On Verity Sense it usually '
-          'needs SDK Mode, which turns off heart rate.',
+          'Gyroscope is not available on this connection. Polar lists it at '
+          '52 Hz in normal mode; the sensor may have rejected the start.',
         );
       },
       onDone: () => _gyroStreaming = false,
@@ -727,12 +773,12 @@ class PolarRepository {
     );
   }
 
-  Future<void> startPpiStreaming() async {
-    if (_connectedDeviceId == null || _ppiStreaming) return;
+  Future<void> startPpiStreaming({bool silent = false}) async {
+    if (_connectedDeviceId == null || _ppiStreaming || _sdkModeEnabled) return;
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      _errorController.add(e.toString());
+      _emitStreamFailure('PPI', e, silent: silent);
       return;
     }
     final deviceId = _connectedDeviceId;
@@ -751,14 +797,23 @@ class PolarRepository {
       },
       onError: (Object e) {
         _ppiStreaming = false;
-        _errorController.add('PPI stream error: $e');
+        _emitStreamFailure('PPI', e, silent: silent);
       },
       onDone: () => _ppiStreaming = false,
     );
   }
 
+  Future<void> stopPpiStreaming() async {
+    await _ppiSub?.cancel();
+    _ppiSub = null;
+    _ppiStreaming = false;
+  }
+
   Future<String> startLocalSession(String name, [String? dataTypes]) async {
-    await startEnabledMotionStreams(silent: true);
+    await startAllAvailableStreams(silent: true);
+    if (_recordPpi && !_sdkModeEnabled) {
+      unawaited(startPpiStreaming(silent: true));
+    }
     final sessionId = _uuid.v4();
     final session = RecordingSession(
       id: sessionId,
@@ -779,6 +834,8 @@ class PolarRepository {
   Future<void> stopLocalSession() async {
     _flushTimer?.cancel();
     await _flushSessionBuffer();
+    // Dedicated PPI stream slows live HR to ~5s. Stop it after the take
+    // so watching Live stays at ~1 Hz; RR intervals on HR packets remain.
     if (_currentSessionId != null) {
       final count = await _db.getSampleCount(_currentSessionId!);
       await _db.updateSessionSampleCount(
@@ -788,6 +845,7 @@ class PolarRepository {
       );
     }
     _currentSessionId = null;
+    await stopPpiStreaming();
     _sessionsChangedController.add(null);
   }
 

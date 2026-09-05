@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../metrics/hrv.dart';
 import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
 import '../polar/polar_repository.dart';
@@ -92,14 +93,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
     final avgHr = allHr.isEmpty ? null : (allHr.reduce((a, b) => a + b) / allHr.length).round();
+    final allSamples = _samples.values.expand((list) => list);
+    final hrv = computeHrv(allSamples);
 
-    return Row(
+    return Column(
       children: [
-        Expanded(child: _SummaryCard(title: 'Sessions', value: '$totalSessions', icon: Icons.folder)),
-        const SizedBox(width: 12),
-        Expanded(child: _SummaryCard(title: 'Samples', value: '$totalSamples', icon: Icons.data_usage)),
-        const SizedBox(width: 12),
-        Expanded(child: _SummaryCard(title: 'Avg HR', value: avgHr != null ? '$avgHr' : '--', icon: Icons.favorite)),
+        Row(
+          children: [
+            Expanded(child: _SummaryCard(title: 'Sessions', value: '$totalSessions', icon: Icons.folder)),
+            const SizedBox(width: 12),
+            Expanded(child: _SummaryCard(title: 'Samples', value: '$totalSamples', icon: Icons.data_usage)),
+            const SizedBox(width: 12),
+            Expanded(child: _SummaryCard(title: 'Avg HR', value: avgHr != null ? '$avgHr' : '--', icon: Icons.favorite)),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _SummaryCard(
+                title: 'RMSSD',
+                value: hrv.rmssd == null ? '--' : '${hrv.rmssd!.round()}',
+                icon: Icons.monitor_heart,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _SummaryCard(
+                title: 'SDNN',
+                value: hrv.sdnn == null ? '--' : '${hrv.sdnn!.round()}',
+                icon: Icons.timeline,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _SummaryCard(
+                title: 'pNN50',
+                value: hrv.pnn50 == null ? '--' : '${hrv.pnn50!.round()}%',
+                icon: Icons.percent,
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }

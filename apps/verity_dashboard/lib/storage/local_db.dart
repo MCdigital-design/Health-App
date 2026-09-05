@@ -4,12 +4,13 @@ import '../charts/chart_math.dart';
 import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
 
-enum ChartSignal { hr, ppg, acc, gyro, mag }
+enum ChartSignal { hr, ppg, ppi, acc, gyro, mag }
 
 extension ChartSignalColumn on ChartSignal {
   String get column => switch (this) {
         ChartSignal.hr => 'hr',
         ChartSignal.ppg => 'ppg',
+        ChartSignal.ppi => 'ppi',
         ChartSignal.acc => 'acc',
         ChartSignal.gyro => 'gyro',
         ChartSignal.mag => 'mag',
@@ -165,14 +166,26 @@ class LocalDb {
     final samples = await getSamplesWithSignal(sessionId, signal);
     final pairs = <(int, double)>[];
     for (final s in samples) {
-      final value = switch (signal) {
-        ChartSignal.hr => s.hr?.toDouble(),
-        ChartSignal.ppg => s.ppgChannel0,
-        ChartSignal.acc => s.accMagnitude,
-        ChartSignal.gyro => s.gyroMagnitude,
-        ChartSignal.mag => s.magMagnitude,
-      };
-      if (value != null) pairs.add((s.timestampMs, value));
+      switch (signal) {
+        case ChartSignal.hr:
+          if (s.hr != null) pairs.add((s.timestampMs, s.hr!.toDouble()));
+        case ChartSignal.ppg:
+          final v = s.ppgChannel0;
+          if (v != null) pairs.add((s.timestampMs, v));
+        case ChartSignal.ppi:
+          for (final rr in s.ppi ?? const <int>[]) {
+            pairs.add((s.timestampMs, rr.toDouble()));
+          }
+        case ChartSignal.acc:
+          final v = s.accMagnitude;
+          if (v != null) pairs.add((s.timestampMs, v));
+        case ChartSignal.gyro:
+          final v = s.gyroMagnitude;
+          if (v != null) pairs.add((s.timestampMs, v));
+        case ChartSignal.mag:
+          final v = s.magMagnitude;
+          if (v != null) pairs.add((s.timestampMs, v));
+      }
     }
     return elapsedSeries(samples: pairs, sessionStartMs: sessionStartMs);
   }

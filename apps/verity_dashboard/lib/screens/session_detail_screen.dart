@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import '../charts/chart_math.dart';
+import '../metrics/hrv.dart';
 import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
 import '../storage/local_db.dart';
@@ -21,9 +22,11 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
   List<SensorSample> _samples = [];
   List<TimeValue> _hr = const [];
   List<TimeValue> _ppg = const [];
+  List<TimeValue> _ppi = const [];
   List<TimeValue> _acc = const [];
   List<TimeValue> _gyro = const [];
   List<TimeValue> _mag = const [];
+  HrvSummary _hrv = HrvSummary.empty;
   SessionSampleCounts _counts = SessionSampleCounts.empty;
   int _estimatedBytes = 0;
   bool _loading = true;
@@ -44,20 +47,24 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
       db.estimateSessionBytes(session.id),
       db.getChartSeries(sessionId: session.id, signal: ChartSignal.hr, sessionStartMs: session.startTimeMs),
       db.getChartSeries(sessionId: session.id, signal: ChartSignal.ppg, sessionStartMs: session.startTimeMs),
+      db.getChartSeries(sessionId: session.id, signal: ChartSignal.ppi, sessionStartMs: session.startTimeMs),
       db.getChartSeries(sessionId: session.id, signal: ChartSignal.acc, sessionStartMs: session.startTimeMs),
       db.getChartSeries(sessionId: session.id, signal: ChartSignal.gyro, sessionStartMs: session.startTimeMs),
       db.getChartSeries(sessionId: session.id, signal: ChartSignal.mag, sessionStartMs: session.startTimeMs),
     ]);
     if (!mounted) return;
+    final samples = results[0] as List<SensorSample>;
     setState(() {
-      _samples = results[0] as List<SensorSample>;
+      _samples = samples;
       _counts = results[1] as SessionSampleCounts;
       _estimatedBytes = results[2] as int;
       _hr = results[3] as List<TimeValue>;
       _ppg = results[4] as List<TimeValue>;
-      _acc = results[5] as List<TimeValue>;
-      _gyro = results[6] as List<TimeValue>;
-      _mag = results[7] as List<TimeValue>;
+      _ppi = results[5] as List<TimeValue>;
+      _acc = results[6] as List<TimeValue>;
+      _gyro = results[7] as List<TimeValue>;
+      _mag = results[8] as List<TimeValue>;
+      _hrv = computeHrv(samples);
       _loading = false;
     });
   }
@@ -188,11 +195,11 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                           const Padding(
                             padding: EdgeInsets.only(top: 12),
                             child: Text(
-                              'Accel / gyro / mag are 0 because this recording never asked '
-                              'the sensor for motion streams — only HR and PPG were started. '
-                              'New recordings turn accelerometer on by default (Settings → '
-                              'Motion sensors). Gyro often needs SDK Mode, which disables HR. '
-                              'Magnetometer is frequently unavailable on Verity Sense.',
+                              'This older take never started motion streams. New recordings '
+                              'request accelerometer, gyroscope, and magnetometer together '
+                              'with HR and PPG (Settings → Motion sensors). Polar documents '
+                              'those six online streams on Verity Sense. SDK Mode is left '
+                              'off so heart rate stays on.',
                               style: TextStyle(fontSize: 12, color: Colors.orangeAccent),
                             ),
                           ),
@@ -213,46 +220,62 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                 const SizedBox(height: 16),
                 const _PrivacyCard(),
                 const SizedBox(height: 16),
+                _HrvCard(hrv: _hrv),
+                const SizedBox(height: 16),
                 InteractiveTimeChart(
                   title: 'Heart Rate',
                   unit: 'bpm',
                   color: Colors.redAccent,
                   points: _hr,
+                  clockStartMs: session.startTimeMs,
                   emptyLabel: _counts.hr == 0
                       ? 'No heart-rate samples in this recording'
                       : 'Heart-rate samples could not be plotted',
                 ),
                 const SizedBox(height: 16),
                 InteractiveTimeChart(
-                  title: 'PPG (first channel)',
-                  unit: 'raw',
+                  title: 'PPG',
                   color: Colors.blueAccent,
                   points: _ppg,
+                  clockStartMs: session.startTimeMs,
                   emptyLabel: 'No PPG samples in this recording',
                 ),
+                if (_ppi.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  InteractiveTimeChart(
+                    title: 'Beat interval',
+                    unit: 'ms',
+                    color: Colors.lightGreenAccent,
+                    points: _ppi,
+                    clockStartMs: session.startTimeMs,
+                  ),
+                ],
                 if (_acc.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   InteractiveTimeChart(
-                    title: 'Accelerometer (magnitude)',
+                    title: 'Accelerometer',
                     unit: 'mg',
                     color: Colors.tealAccent,
                     points: _acc,
+                    clockStartMs: session.startTimeMs,
                   ),
                 ],
                 if (_gyro.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   InteractiveTimeChart(
-                    title: 'Gyroscope (magnitude)',
+                    title: 'Gyroscope',
                     color: Colors.amberAccent,
                     points: _gyro,
+                    clockStartMs: session.startTimeMs,
                   ),
                 ],
                 if (_mag.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   InteractiveTimeChart(
-                    title: 'Magnetometer (magnitude)',
+                    title: 'Magnetometer',
                     color: Colors.purpleAccent,
                     points: _mag,
+                    clockStartMs: session.startTimeMs,
                   ),
                 ],
                 if (_exportedPath != null)
@@ -343,6 +366,62 @@ class _PrivacyCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+class _HrvCard extends StatelessWidget {
+  final HrvSummary hrv;
+
+  const _HrvCard({required this.hrv});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Heart-rate variability', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(
+              'HRV is the change in time between beats. Polar Verity Sense '
+              'gives those intervals on the HR stream (and a dedicated PPI '
+              'stream while you Record). RMSSD is the usual recovery number; '
+              'we calculate it on the phone from stored beats — nothing extra '
+              'is sent to Polar or GitHub.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                _MetricChip(label: 'RMSSD', value: _ms(hrv.rmssd)),
+                _MetricChip(label: 'SDNN', value: _ms(hrv.sdnn)),
+                _MetricChip(label: 'pNN50', value: hrv.pnn50 == null ? '—' : '${hrv.pnn50!.round()}%'),
+                _MetricChip(label: 'Mean HR', value: hrv.meanHr == null ? '—' : '${hrv.meanHr}'),
+                _MetricChip(label: 'Min / max', value: hrv.minHr == null ? '—' : '${hrv.minHr}–${hrv.maxHr}'),
+                _MetricChip(label: 'Beats', value: '${hrv.intervalCount}'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _ms(double? value) => value == null ? '—' : '${value.round()} ms';
+}
+
+class _MetricChip extends StatelessWidget {
+  final String label;
+  final String value;
+  const _MetricChip({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(label: Text('$label  $value'));
   }
 }
 

@@ -15,6 +15,22 @@ void main() {
       expect(series.map((p) => p.seconds), [1.0, 2.0]);
     });
 
+    test('rebases when Polar clock is tens of minutes behind the phone', () {
+      // The 16-minute PPG chart plotted -59:44 … -43:20 because a 1-hour
+      // slack treated a ~50-minute sensor offset as the session clock.
+      const start = 1_000_000_000_000;
+      final series = elapsedSeries(
+        samples: [
+          (start - 3584000, 300000),
+          (start - 2600000, 310000),
+        ],
+        sessionStartMs: start,
+      );
+      expect(series.first.seconds, 0);
+      expect(series.last.seconds, closeTo(984, 0.1));
+      expect(series.every((p) => p.seconds >= 0), isTrue);
+    });
+
     test('falls back to first sample when Polar timestamps are in another epoch', () {
       // Polar PPG often arrives with a sensor clock far from Unix time.
       // Heart-rate rows use DateTime.now(), so a shared ORDER BY hid HR
@@ -106,6 +122,14 @@ void main() {
       expect(formatLeanValue(hrAvg).contains('.'), isFalse);
       expect(formatTouchTooltip(y: hrAvg).contains('158.93333333333334'), isFalse);
       expect(formatTouchTooltip(y: ppgAvg).contains('330032.4891472868'), isFalse);
+    });
+
+    test('formatSessionClock is wall time, not elapsed or negative', () {
+      final start = DateTime(2026, 9, 5, 13, 0).millisecondsSinceEpoch;
+      expect(formatSessionClock(start, 0), '13:00');
+      expect(formatSessionClock(start, 20 * 60), '13:20');
+      expect(formatSessionClock(start, 987, windowSeconds: 987), '13:16');
+      expect(formatSessionClock(start, -3584), isNot(contains('-')));
     });
 
     test('formatLiveAgo uses now / minutes, not -600s', () {

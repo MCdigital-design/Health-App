@@ -23,15 +23,26 @@ List<TimeValue> elapsedSeries({
   if (samples.isEmpty) return const [];
   final sorted = [...samples]..sort((a, b) => a.$1.compareTo(b.$1));
   const dayMs = 24 * 60 * 60 * 1000;
+  // Only treat Polar timestamps as the phone clock when they actually
+  // overlap the session. A 1-hour slack previously classified a ~50-minute
+  // sensor-clock offset as "near", so PPG plotted at -59:44 … -43:20.
+  const slackMs = 30 * 1000;
   final nearSession = sorted.where((s) {
     final delta = s.$1 - sessionStartMs;
-    return delta >= -60 * 60 * 1000 && delta <= dayMs;
+    return delta >= -slackMs && delta <= dayMs;
   }).length;
   final useSessionClock = nearSession >= (sorted.length / 2).ceil();
-  final origin = useSessionClock ? sessionStartMs : sorted.first.$1;
-  return [
+  var origin = useSessionClock ? sessionStartMs : sorted.first.$1;
+  var points = [
     for (final s in sorted) TimeValue((s.$1 - origin) / 1000.0, s.$2),
   ];
+  if (points.isNotEmpty && (points.last.seconds < 0 || points.first.seconds < -5)) {
+    origin = sorted.first.$1;
+    points = [
+      for (final s in sorted) TimeValue((s.$1 - origin) / 1000.0, s.$2),
+    ];
+  }
+  return points;
 }
 
 /// Min/max envelope downsample. Preserves peaks (unlike averaging) so a
@@ -269,6 +280,25 @@ double liveXInterval(double windowSeconds) {
   if (windowSeconds <= 600) return 300;
   if (windowSeconds <= 1800) return 900;
   return 3600;
+}
+
+/// Wall-clock label for a session sample: start 13:00 + 20 min → `13:20`.
+String formatSessionClock(
+  int clockStartMs,
+  double elapsedSeconds, {
+  double windowSeconds = 600,
+}) {
+  if (!elapsedSeconds.isFinite) return '--';
+  final dt = DateTime.fromMillisecondsSinceEpoch(
+    clockStartMs + (elapsedSeconds * 1000).round(),
+  );
+  final hh = dt.hour.toString().padLeft(2, '0');
+  final mm = dt.minute.toString().padLeft(2, '0');
+  if (windowSeconds < 180) {
+    final ss = dt.second.toString().padLeft(2, '0');
+    return '$hh:$mm:$ss';
+  }
+  return '$hh:$mm';
 }
 
 String formatWindowLabel(Duration window) {

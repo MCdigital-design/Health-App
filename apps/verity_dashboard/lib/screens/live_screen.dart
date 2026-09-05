@@ -315,6 +315,7 @@ class _LiveScreenState extends State<LiveScreen> {
                 children: [
                   _StreamChip(label: 'HR', active: _repo.isHrActive),
                   _StreamChip(label: 'PPG', active: _repo.isPpgActive),
+                  _StreamChip(label: 'PPI', active: _repo.isPpiActive),
                   _StreamChip(label: 'Accel', active: _repo.isAccActive),
                   _StreamChip(label: 'Gyro', active: _repo.isGyroActive),
                   _StreamChip(label: 'Mag', active: _repo.isMagActive),

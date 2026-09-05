@@ -17,8 +17,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _sdkMode = false;
   bool _autoReconnect = false;
   bool _recordAccel = true;
-  bool _recordGyro = false;
-  bool _recordMag = false;
+  bool _recordGyro = true;
+  bool _recordMag = true;
+  bool _recordPpi = true;
   bool _scanning = false;
   StreamSubscription? _deviceSub;
   StreamSubscription? _connSub;
@@ -46,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _recordAccel = repo.recordAccel;
     _recordGyro = repo.recordGyro;
     _recordMag = repo.recordMag;
+    _recordPpi = repo.recordPpi;
     _deviceSub = repo.deviceFoundStream.listen((device) {
       if (!_foundDevices.any((d) => d.deviceId == device.deviceId)) {
         setState(() => _foundDevices.add(device));
@@ -309,8 +311,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Column(
               children: [
                 SwitchListTile(
-                  title: const Text('Record accelerometer'),
-                  subtitle: const Text('On by default. Adds ~15 MB/hour at 50 Hz. This is the motion sensor Verity Sense actually exposes in normal mode.'),
+                  title: const Text('Accelerometer'),
+                  subtitle: const Text('On. Polar default 52 Hz, 8 g. ~15 MB/hour.'),
                   value: _recordAccel,
                   onChanged: (v) async {
                     setState(() => _recordAccel = v);
@@ -318,8 +320,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
                 SwitchListTile(
-                  title: const Text('Record gyroscope'),
-                  subtitle: const Text('Usually needs SDK Mode, which turns off heart rate. Leave off unless you need raw rotation.'),
+                  title: const Text('Gyroscope'),
+                  subtitle: const Text('On. Polar lists 52 Hz in normal mode — SDK Mode is not required.'),
                   value: _recordGyro,
                   onChanged: (v) async {
                     setState(() => _recordGyro = v);
@@ -327,12 +329,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
                 SwitchListTile(
-                  title: const Text('Record magnetometer'),
-                  subtitle: const Text('Often unavailable on Verity Sense. Safe to leave off.'),
+                  title: const Text('Magnetometer'),
+                  subtitle: const Text('On. Started if the sensor offers it; ignored if it does not.'),
                   value: _recordMag,
                   onChanged: (v) async {
                     setState(() => _recordMag = v);
                     await repo.setRecordMag(v);
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('PPI while recording'),
+                  subtitle: const Text(
+                    'Polar’s beat-to-beat stream for HRV. While it runs, live BPM '
+                    'updates about every 5 seconds. We still compute HRV from RR '
+                    'intervals on the HR packets either way.',
+                  ),
+                  value: _recordPpi,
+                  onChanged: (v) async {
+                    setState(() => _recordPpi = v);
+                    await repo.setRecordPpi(v);
                   },
                 ),
               ],
@@ -484,7 +499,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('About', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('Verity Dashboard v1.2.2'),
+                  const Text('Verity Dashboard v1.2.3'),
                   const Text('Offline-first Polar Verity Sense client'),
                 ],
               ),

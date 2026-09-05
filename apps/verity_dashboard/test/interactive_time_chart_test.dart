@@ -10,24 +10,27 @@ void main() {
         TimeValue(i.toDouble(), 312800 + (i % 40) * 400.0),
     ];
 
+    final start = DateTime(2026, 9, 5, 13, 0).millisecondsSinceEpoch;
     await tester.pumpWidget(
       MaterialApp(
         theme: ThemeData.dark(),
         home: Scaffold(
           body: InteractiveTimeChart(
-            title: 'PPG (first channel)',
-            unit: 'raw',
+            title: 'PPG',
             color: Colors.blueAccent,
             points: points,
+            clockStartMs: start,
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('PPG (first channel)'), findsOneWidget);
-    expect(find.text('0:00'), findsWidgets);
-    expect(find.textContaining('16:'), findsWidgets);
+    expect(find.text('PPG'), findsOneWidget);
+    expect(find.text('raw'), findsNothing);
+    expect(find.textContaining('-59'), findsNothing);
+    expect(find.text('13:00'), findsWidgets);
+    expect(find.textContaining('13:'), findsWidgets);
     expect(find.text('No data'), findsNothing);
     // Compact labels, not the wrapped "329.\n7K" bug.
     expect(find.textContaining('k'), findsWidgets);

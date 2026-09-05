@@ -11,6 +11,9 @@ class InteractiveTimeChart extends StatefulWidget {
   final List<TimeValue> points;
   final String emptyLabel;
   final double height;
+  /// Session start on the phone clock. When set, X labels are wall-clock
+  /// (`13:20`) instead of elapsed (`0:20`) or negative Polar offsets.
+  final int? clockStartMs;
 
   const InteractiveTimeChart({
     super.key,
@@ -20,6 +23,7 @@ class InteractiveTimeChart extends StatefulWidget {
     this.unit,
     this.emptyLabel = 'No data',
     this.height = 240,
+    this.clockStartMs,
   });
 
   @override
@@ -147,6 +151,16 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
     final spots = [for (final p in visible) FlSpot(p.seconds, p.value)];
     final zoomed = _viewMin != null;
     final last = widget.points.isEmpty ? null : widget.points.last.value;
+    String xLabel(double seconds) {
+      if (widget.clockStartMs != null) {
+        return formatSessionClock(
+          widget.clockStartMs!,
+          seconds,
+          windowSeconds: xSpan,
+        );
+      }
+      return formatElapsed(seconds);
+    }
 
     return Card(
       child: Padding(
@@ -182,7 +196,7 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
             const SizedBox(height: 4),
             Text(
               zoomed
-                  ? '${formatElapsed(_minX)} – ${formatElapsed(_maxX)}  ·  pinch or drag  ·  double-tap to reset'
+                  ? '${xLabel(_minX)} – ${xLabel(_maxX)}  ·  pinch or drag  ·  double-tap to reset'
                   : 'Pinch to zoom, drag to pan, or use + / −',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.white54),
             ),
@@ -247,14 +261,14 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
                             bottomTitles: AxisTitles(
                               sideTitles: SideTitles(
                                 showTitles: true,
-                                reservedSize: 22,
+                                reservedSize: 28,
                                 interval: xInterval,
                                 getTitlesWidget: (value, meta) {
                                   return SideTitleWidget(
                                     axisSide: meta.axisSide,
                                     space: 4,
                                     child: Text(
-                                      formatElapsed(value),
+                                      xLabel(value),
                                       maxLines: 1,
                                       style: const TextStyle(fontSize: 10, color: Colors.white70),
                                     ),
@@ -283,7 +297,7 @@ class _InteractiveTimeChartState extends State<InteractiveTimeChart> {
                                     formatTouchTooltip(
                                       y: t.y,
                                       unit: widget.unit,
-                                      when: formatElapsed(t.x),
+                                      when: xLabel(t.x),
                                     ),
                                     const TextStyle(
                                       fontSize: 13,

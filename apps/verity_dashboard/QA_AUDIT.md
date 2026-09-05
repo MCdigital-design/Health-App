@@ -120,6 +120,17 @@ the last sample's full value sits in a colored chip; PPG watchdog uses
 phone wall-clock so it does not restart a healthy stream and raise
 `ERROR_ALREADY_IN_STATE`.
 
+**Session PPG negative X (v1.2.3):** Polar timestamps ~50 minutes behind
+the phone were treated as the session clock (1-hour slack). Charts now
+rebase to the first sample and label X with wall-clock time
+(13:00 + 20 min → `13:20`). The word `raw` is not shown.
+
+**Verity Sense capture (official Polar SDK):** HR, PPG, PPI, ACC 52 Hz,
+gyro 52 Hz, magnetometer. No ECG / GPS / temperature on this sensor.
+SDK Mode is left off (it disables HR and PPI). New recordings start
+HR+PPG+ACC+gyro+mag, plus PPI for the take. HRV (RMSSD/SDNN/pNN50) is
+calculated from stored beat intervals.
+
 **New feature — adaptive chart:** `LiveChart` uses `LayoutBuilder` to size
 itself relative to available width (clamped 140–260px), switches to a
 side-by-side layout above 700px width (tablets/landscape) via the Live
