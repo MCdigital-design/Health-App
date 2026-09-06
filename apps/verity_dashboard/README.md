@@ -8,7 +8,7 @@ This app lives in [Health-App](https://github.com/MCdigital-design/Health-App). 
 
 Use this file only:
 
-- [`dist/verity-dashboard.apk`](../../dist/verity-dashboard.apk) (28 MB, SHA256 `3553f8ead2deceb61bf5f1d6a0d231fef432872f071987e850e700a210c27092`)
+- [`dist/verity-dashboard.apk`](../../dist/verity-dashboard.apk) (30 MB, SHA256 `223f248eb9dbba1d768c302b35e06313d22726245feb2424c21444af53c74103`)
 - Direct: https://github.com/MCdigital-design/Health-App/raw/main/dist/verity-dashboard.apk
 
 This build is signed with the same key as before, so it installs as an **update** over a previous install — no need to uninstall first.
@@ -42,11 +42,11 @@ Go to **Settings** and check the **SDK Mode** toggle. Verity Sense **disables He
 
 ### Chart timeframes
 
-The Live tab has a row of chips (Real-time / 1s / 5s / 30s / 1m / 5m) above the charts. Larger windows automatically average samples into buckets instead of plotting every point, so a 5-minute view stays fast and readable even for high-rate PPG data.
+The Live tab has a row of chips (Real-time / 30s / 2m / 10m / 30m / 2h) above the charts — those names are the visible window, not the bucket size. Larger windows automatically average samples into buckets instead of plotting every point. Axis ticks are whole numbers; the latest exact sample sits in the colored chip on each chart.
 
 ### Recording data
 
-- **Live tab → Record** button: records whatever is currently streaming (HR/PPG) into local storage on the phone. This is the primary recording path for this app. Sessions are saved to a local SQLite database that survives app restarts and updates — they are only lost if the app is uninstalled or its storage is manually cleared.
+- **Live tab → Record** button: records whatever is currently streaming into a full-resolution SQLite table on the phone (HR/PPG, plus accelerometer by default). This is one-way Bluetooth into the app — it does **not** write back to the sensor and will **not** appear in Polar Flow or the official Polar app. Sessions survive app restarts and APK updates; delete one from the session screen, or clear all recordings in Settings. This app does not upload health data to GitHub.
 - **Recordings tab → On Device**: lists exercises recorded using the sensor's own physical button and synced through a Polar Flow account. This only works if the sensor has been paired with Polar Flow and used in recording/swimming mode — it is a Polar Verity Sense limitation, not something this app can bypass.
 - **Recordings tab → Polar Flow import**: pulls exercises already uploaded to your Polar Flow account, including ones no longer on the sensor itself. Requires a one-time setup in **Settings → Polar Flow** using your own free API client from [admin.polaraccesslink.com](https://admin.polaraccesslink.com) — see that section in Settings for the exact steps (this cannot be pre-configured, since it needs your Polar account login).
 - Tap any session in **Recordings** or **Dashboard** to see a full breakdown: per-signal sample counts, estimated storage size, and CSV export.

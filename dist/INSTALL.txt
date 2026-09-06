@@ -12,9 +12,78 @@ installed a version, just install this one on top - no need to uninstall.
 4. If Play Protect warns: More details -> Install anyway.
 
 Requires Android 8.0 or newer. Release-signed (not debug/testOnly).
-SHA256: 3553f8ead2deceb61bf5f1d6a0d231fef432872f071987e850e700a210c27092
+SHA256: 223f248eb9dbba1d768c302b35e06313d22726245feb2424c21444af53c74103
 
-WHAT'S NEW IN THIS BUILD (fixes a 12-minute-recording-with-zero-HR bug):
+WHAT'S NEW IN THIS BUILD (v1.2.7 — adaptive models, any account, Studio):
+
+- Model list comes from whoever signs in, not a hardcoded gpt-5.4 / 5.5.
+  Pick one. Default to a model that account can use.
+- Switch account / sign out. The next person uses their ChatGPT login
+  and their models.
+- Context depth: Compact / Standard / Full. Standard is the default.
+  That is not 40,000 raw PPG rows — those envelopes keep the shape
+  without flooding the model (40k PPG rows is ~1.7 MB, not 40 KB).
+- AI tab opens Chat or Studio. Studio (and Chat “make a dashboard”)
+  can save custom views on the phone; they also show on Dashboard.
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.6 — ChatGPT chat after device login):
+
+- Device verify already worked. Chat was HTTP 400 because the request
+  used a system message, extra fields, and gpt-4o. It now matches the
+  ChatGPT Codex body (gpt-5.4, instructions + user input only).
+- You can stay signed in. Install this update and send "hi" again.
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.5 — size explainer, collapsible copy, ChatGPT):
+
+- A 25-minute HR-only take is supposed to be ~28 KB. A 16-minute take
+  with PPG is ~1.7 MB. Nothing is compressed — PPG is ~40 rows/second.
+- Long Q&A copy is collapsed behind tap-to-expand hints.
+- New AI tab: Sign in with ChatGPT at auth.openai.com/codex/device using
+  your own subscription. Only a compact session summary is sent.
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.4 — production hardening):
+
+- Crash / force-stop no longer leaves a recording open forever. Relaunch
+  closes it at the last saved sample.
+- Samples are not dropped if a SQLite write fails; the buffer is retried.
+- Locking or leaving the app flushes the last seconds to disk.
+- Android Backup will not upload the health database or Polar tokens.
+- Settings → About: not a medical device; keep the app on-screen while
+  recording (no background foreground-service).
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.3 — session clock, full Verity streams, HRV):
+
+- Session PPG X-axis is wall-clock time (13:20), not -59:44.
+- The word "raw" is gone from charts.
+- New recordings start HR, PPG, ACC, gyro, mag, and PPI (for the take).
+- Dashboard and session detail show RMSSD / SDNN / pNN50.
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.2 — lean chart numbers):
+
+- Tapping a point no longer dumps 14 decimal places
+  (158.93333333333334 / 330032.4891472868). The chart chip is a whole
+  number; the blue box keeps the trimmed fraction. Raw SQLite is unchanged.
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.1 — Live axes and PPG already-running):
+
+- Live timeframe chips name the window (Real-time / 30s / 2m / 10m / 30m / 2h).
+- Chart Y ticks are even numbers. The exact last sample sits in the colored chip.
+- Live X axis uses now / -10m, not -600s.
+- App bar shows the connected device id.
+- PPG no longer restarts every few seconds just because Polar timestamps
+  are on a different clock (that was the ERROR_ALREADY_IN_STATE overlay).
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.0 — session charts, motion, storage):
+
+- Session Heart Rate no longer shows "No data" when HR rows exist (was
+  hidden behind the first 5,000 PPG rows).
+- Session charts use elapsed time on X, compact Y labels, pinch/drag zoom.
+- Accelerometer starts on new recordings by default.
+- Storage / Polar / GitHub privacy copy, plus delete-all in Settings.
+
+Previous build's fixes are still included (SDK Mode, HR retry, etc).
+
+WHAT'S NEW IN THE PREVIOUS BUILD (fixes a 12-minute-recording-with-zero-HR bug):
 
 - Fixed a real root cause: toggling SDK Mode while a stream (e.g. PPG)
   was already running caused the sensor to silently reject the mode

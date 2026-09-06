@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/recording_session.dart';
+import '../charts/chart_math.dart';
 import '../polar/accesslink_service.dart';
 import '../polar/polar_repository.dart';
 import '../storage/local_db.dart';
+import '../widgets/collapsible_hint.dart';
 import 'session_detail_screen.dart';
 
 class RecordingsScreen extends StatefulWidget {
@@ -18,6 +20,7 @@ class RecordingsScreen extends StatefulWidget {
 class _RecordingsScreenState extends State<RecordingsScreen> {
   final _accessLink = AccessLinkService();
   List<RecordingSession> _sessions = [];
+  Map<String, int> _sessionBytes = {};
   List<dynamic> _deviceExercises = [];
   bool _loading = false;
   bool _polarFlowLinked = false;
@@ -50,7 +53,13 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
 
   Future<void> _loadSessions() async {
     final sessions = await LocalDb.instance.getSessions();
-    if (mounted) setState(() => _sessions = sessions);
+    final bytes = await LocalDb.instance.estimateAllSessionBytes();
+    if (mounted) {
+      setState(() {
+        _sessions = sessions;
+        _sessionBytes = bytes;
+      });
+    }
   }
 
   Future<void> _scanDeviceExercises() async {
@@ -143,13 +152,13 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                 padding: const EdgeInsets.all(16),
                 children: [
                   Text('On Device (not yet synced)', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Training sessions recorded using the sensor\'s own button (recording or '
-                    'swimming mode). This requires the sensor to be registered with a Polar '
-                    'Flow account — a Polar Verity Sense limitation, not something this app '
-                    'controls. Tap the download icon to pull one onto the phone.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'What this list is',
+                    body:
+                        'Training sessions recorded using the sensor\'s own button (recording or '
+                        'swimming mode). This requires the sensor to be registered with a Polar '
+                        'Flow account — a Polar Verity Sense limitation, not something this app '
+                        'controls. Tap the download icon to pull one onto the phone.',
                   ),
                   const SizedBox(height: 8),
                   if (_deviceExercises.isEmpty)
@@ -172,12 +181,12 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                         )),
                   const SizedBox(height: 24),
                   Text('Polar Flow import', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Sessions already uploaded to your Polar Flow account (including ones no '
-                    'longer stored on the sensor itself). Requires a one-time setup in Settings '
-                    'using your own free Polar API client.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'Cloud history, not live recordings',
+                    body:
+                        'Sessions already uploaded to your Polar Flow account (including ones no '
+                        'longer stored on the sensor itself). Requires a one-time setup in Settings '
+                        'using your own free Polar API client.',
                   ),
                   const SizedBox(height: 8),
                   Card(
@@ -208,11 +217,11 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                   ),
                   const SizedBox(height: 24),
                   Text('All sessions on phone', style: Theme.of(context).textTheme.titleLarge),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Everything captured live through this app, synced from the sensor, or '
-                    'imported from Polar Flow. Tap a session for details.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'These stay on the phone',
+                    body:
+                        'Live recordings stay on this phone only. They do not appear in Polar Flow '
+                        'or the official Polar app. Tap a session for charts, storage, and delete.',
                   ),
                   const SizedBox(height: 8),
                   if (_sessions.isEmpty)
@@ -229,7 +238,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                             title: Text(s.name),
                             subtitle: Text(
                               '${dateFmt.format(DateTime.fromMillisecondsSinceEpoch(s.startTimeMs))} • '
-                              '${s.sampleCount} samples',
+                              '${s.sampleCount} samples'
+                              '${_sessionBytes[s.id] != null ? ' • ${formatBytes(_sessionBytes[s.id]!)}' : ''}',
                             ),
                             trailing: Chip(
                               label: Text(s.source.label, style: const TextStyle(fontSize: 11)),

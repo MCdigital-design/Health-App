@@ -6,6 +6,7 @@ import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
 import '../models/time_series_buffer.dart';
 import '../storage/local_db.dart';
+import 'polar_errors.dart';
 
 /// Thrown when a Polar SDK feature does not become ready in time, e.g.
 /// because SDK Mode is disabling it (Verity Sense disables HR/PPI in SDK Mode).
@@ -18,6 +19,10 @@ class PolarFeatureTimeoutException implements Exception {
 
 const _prefAutoReconnect = 'autoReconnect';
 const _prefLastDeviceId = 'lastDeviceId';
+const _prefRecordAccel = 'recordAccelerometer';
+const _prefRecordGyro = 'recordGyroscope';
+const _prefRecordMag = 'recordMagnetometer';
+const _prefRecordPpi = 'recordPpi';
 
 /// How long a stream can go without a new sample before it's considered
 /// stalled and force-restarted. Set well above normal HR cadence (~1/s) and
@@ -25,6 +30,7 @@ const _prefLastDeviceId = 'lastDeviceId';
 /// and self-healed within seconds rather than leaving a dead flat line.
 const _staleThreshold = Duration(seconds: 12);
 const _watchdogInterval = Duration(seconds: 5);
+const _restartCooldown = Duration(seconds: 15);
 
 /// How often to retry starting a stream that *should* be running (SDK Mode
 /// off, connected) but isn't currently active — covering the case where the
@@ -69,8 +75,8 @@ class PolarRepository {
   /// Live rolling buffers, keyed by real timestamps (not sample-count
   /// indices), shared by any screen that wants to chart them. See
   /// [TimeSeriesBuffer] for why this matters for correctness.
-  final TimeSeriesBuffer hrBuffer = TimeSeriesBuffer(retention: const Duration(minutes: 30));
-  final TimeSeriesBuffer ppgBuffer = TimeSeriesBuffer(retention: const Duration(minutes: 5));
+  final TimeSeriesBuffer hrBuffer = TimeSeriesBuffer(retention: const Duration(hours: 2));
+  final TimeSeriesBuffer ppgBuffer = TimeSeriesBuffer(retention: const Duration(hours: 2));
 
   String? _connectedDeviceId;
   String? get connectedDeviceId => _connectedDeviceId;
@@ -104,11 +110,31 @@ class PolarRepository {
 
   bool get isHrActive => _hrStreaming;
   bool get isPpgActive => _ppgStreaming;
+  bool get isPpiActive => _ppiStreaming;
+  bool get isAccActive => _accStreaming;
+  bool get isGyroActive => _gyroStreaming;
+  bool get isMagActive => _magStreaming;
+
+  bool _recordAccel = true;
+  bool _recordGyro = true;
+  bool _recordMag = true;
+  bool _recordPpi = true;
+  bool get recordAccel => _recordAccel;
+  bool get recordGyro => _recordGyro;
+  bool get recordMag => _recordMag;
+  bool get recordPpi => _recordPpi;
+
+  bool _gyroUnsupported = false;
+  bool _magUnsupported = false;
 
   bool _hrStartInProgress = false;
   bool _ppgStartInProgress = false;
   int? _lastHrStartAttemptMs;
   int? _lastPpgStartAttemptMs;
+  int _lastHrWallClockMs = 0;
+  int _lastPpgWallClockMs = 0;
+  int _lastHrRestartMs = 0;
+  int _lastPpgRestartMs = 0;
 
   StreamSubscription? _hrSub;
   StreamSubscription? _ppgSub;
@@ -120,6 +146,7 @@ class PolarRepository {
   String? _currentSessionId;
   final List<SensorSample> _sessionBuffer = [];
   Timer? _flushTimer;
+  Future<void> _flushLock = Future.value();
 
   PolarRepository() {
     _loadPrefs();
@@ -148,10 +175,7 @@ class PolarRepository {
       // Auto-start both streams immediately on connect so live data shows
       // up without requiring a manual tap. HR is skipped when SDK Mode is
       // on, since Verity Sense does not support HR in that mode.
-      if (!sdkOn) {
-        unawaited(startHrStreaming());
-      }
-      unawaited(startPpgStreaming());
+      unawaited(startAllAvailableStreams(silent: true));
     });
 
     _polar.deviceConnecting.listen((device) {
@@ -163,9 +187,12 @@ class PolarRepository {
         _connectedDeviceId = null;
       }
       _readyFeatures.remove(event.info.deviceId);
+      _gyroUnsupported = false;
+      _magUnsupported = false;
       _cancelAllStreamSubs();
       _stopWatchdog();
       _connectionStateController.add('disconnected:${event.info.deviceId}');
+      unawaited(_flushSessionBuffer());
 
       if (!_userInitiatedDisconnect && _autoReconnectEnabled) {
         _scheduleReconnect(event.info.deviceId);
@@ -182,6 +209,115 @@ class PolarRepository {
     final prefs = await SharedPreferences.getInstance();
     _autoReconnectEnabled = prefs.getBool(_prefAutoReconnect) ?? false;
     _lastDeviceId = prefs.getString(_prefLastDeviceId);
+    _recordAccel = prefs.getBool(_prefRecordAccel) ?? true;
+    _recordGyro = prefs.getBool(_prefRecordGyro) ?? true;
+    _recordMag = prefs.getBool(_prefRecordMag) ?? true;
+    _recordPpi = prefs.getBool(_prefRecordPpi) ?? true;
+  }
+
+  Future<void> setRecordAccel(bool value) async {
+    _recordAccel = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefRecordAccel, value);
+    if (isConnected) {
+      if (value) {
+        await startAccStreaming(silent: true);
+      } else {
+        await _accSub?.cancel();
+        _accStreaming = false;
+      }
+    }
+  }
+
+  Future<void> setRecordGyro(bool value) async {
+    _recordGyro = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefRecordGyro, value);
+    if (isConnected) {
+      if (value) {
+        await startGyroStreaming(silent: true);
+      } else {
+        await _gyroSub?.cancel();
+        _gyroStreaming = false;
+      }
+    }
+  }
+
+  Future<void> setRecordMag(bool value) async {
+    _recordMag = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefRecordMag, value);
+    if (isConnected) {
+      if (value) {
+        await startMagnetometerStreaming(silent: true);
+      } else {
+        await _magSub?.cancel();
+        _magStreaming = false;
+      }
+    }
+  }
+
+  Future<void> setRecordPpi(bool value) async {
+    _recordPpi = value;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_prefRecordPpi, value);
+    if (!isConnected || _sdkModeEnabled) return;
+    if (value) {
+      await startPpiStreaming(silent: true);
+    } else {
+      await stopPpiStreaming();
+    }
+  }
+
+  /// Every Polar Verity Sense online stream that is available *and* does
+  /// not require SDK Mode (which disables HR/PPI). Official list:
+  /// HR, PPG, PPI, ACC (~52 Hz), gyro (~52 Hz), magnetometer.
+  /// ECG / temperature / pressure / GPS are not on this sensor.
+  Future<void> startAllAvailableStreams({bool silent = false}) async {
+    Set<PolarDataType> available = {};
+    final id = _connectedDeviceId;
+    if (id != null) {
+      try {
+        available = await _polar.getAvailableOnlineStreamDataTypes(id);
+      } catch (_) {
+        // Older firmware or plugin gaps — start the documented set anyway.
+      }
+    }
+    bool offers(PolarDataType type) =>
+        available.isEmpty || available.contains(type);
+
+    if (!_sdkModeEnabled) {
+      unawaited(startHrStreaming(silent: silent));
+    }
+    if (offers(PolarDataType.ppg)) {
+      unawaited(startPpgStreaming(silent: silent));
+    }
+    if (_recordAccel && offers(PolarDataType.acc)) {
+      unawaited(startAccStreaming(silent: silent));
+    }
+    if (_recordGyro && offers(PolarDataType.gyro)) {
+      unawaited(startGyroStreaming(silent: silent));
+    }
+    if (_recordMag && offers(PolarDataType.magnetometer)) {
+      unawaited(startMagnetometerStreaming(silent: silent));
+    }
+  }
+
+  Future<void> startEnabledMotionStreams({bool silent = false}) async {
+    await startAllAvailableStreams(silent: silent);
+  }
+
+  String get activeRecordingTypes {
+    // Intended mix, not "streams that have already flipped their flag."
+    // startLocalSession used to snapshot types before ACC/PPI listeners
+    // attached, so the session row said hr,ppg while motion was coming in.
+    final types = <String>['ppg'];
+    if (!_sdkModeEnabled) types.insert(0, 'hr');
+    if (_recordPpi && !_sdkModeEnabled) types.add('ppi');
+    if (_recordAccel) types.add('acc');
+    if (_recordGyro) types.add('gyro');
+    if (_recordMag) types.add('mag');
+    return types.join(',');
   }
 
   Future<void> setAutoReconnect(bool value) async {
@@ -201,6 +337,12 @@ class PolarRepository {
   /// remembered device or the setting is off (no-op).
   Future<void> tryAutoReconnectOnLaunch() async {
     await _loadPrefs();
+    try {
+      await _db.finalizeOrphanedSessions();
+      _sessionsChangedController.add(null);
+    } catch (_) {
+      // Launch must not die because a leftover session row is messy.
+    }
     if (_autoReconnectEnabled && _lastDeviceId != null && !isConnected) {
       _statusController.add('Auto-reconnecting to last device...');
       try {
@@ -245,6 +387,12 @@ class PolarRepository {
     _checkStreamHealth();
   }
 
+  /// Flush the recording buffer when the process may be killed (lock,
+  /// Home, task switch). Android can drop BLE shortly after this.
+  void onAppPaused() {
+    unawaited(_flushSessionBuffer());
+  }
+
   void _startWatchdog() {
     _watchdogTimer?.cancel();
     _watchdogTimer = Timer.periodic(_watchdogInterval, (_) => _checkStreamHealth());
@@ -260,9 +408,15 @@ class PolarRepository {
     final nowMs = DateTime.now().millisecondsSinceEpoch;
 
     if (_hrStreaming) {
-      final last = hrBuffer.lastTimestampMs;
-      if (!_sdkModeEnabled && last != null && nowMs - last > _staleThreshold.inMilliseconds) {
+      // Use phone wall-clock, never Polar sample.timeStamp. Sensor clocks
+      // can sit in another epoch, which made a healthy stream look stalled
+      // and triggered REQUEST_MEASUREMENT_START every 5s.
+      if (!_sdkModeEnabled &&
+          _lastHrWallClockMs > 0 &&
+          nowMs - _lastHrWallClockMs > _staleThreshold.inMilliseconds &&
+          nowMs - _lastHrRestartMs > _restartCooldown.inMilliseconds) {
         _statusController.add('Heart rate stream stalled — restarting...');
+        _lastHrRestartMs = nowMs;
         _hrSub?.cancel();
         _hrStreaming = false;
         unawaited(startHrStreaming(silent: true));
@@ -280,9 +434,11 @@ class PolarRepository {
     }
 
     if (_ppgStreaming) {
-      final last = ppgBuffer.lastTimestampMs;
-      if (last != null && nowMs - last > _staleThreshold.inMilliseconds) {
+      if (_lastPpgWallClockMs > 0 &&
+          nowMs - _lastPpgWallClockMs > _staleThreshold.inMilliseconds &&
+          nowMs - _lastPpgRestartMs > _restartCooldown.inMilliseconds) {
         _statusController.add('PPG stream stalled — restarting...');
+        _lastPpgRestartMs = nowMs;
         _ppgSub?.cancel();
         _ppgStreaming = false;
         unawaited(startPpgStreaming(silent: true));
@@ -381,6 +537,9 @@ class PolarRepository {
       _errorController.add('Could not change SDK Mode: $e');
     }
 
+    _gyroUnsupported = false;
+    _magUnsupported = false;
+
     final actual = await refreshSdkModeState();
     if (actual != enable) {
       _errorController.add(
@@ -426,6 +585,21 @@ class PolarRepository {
     }
   }
 
+  void _emitStreamFailure(String stream, Object error, {required bool silent}) {
+    if (isAlreadyInStateError(error)) {
+      // Native measurement is already running. Do not show the raw
+      // PlatformException SnackBar that covered the Live charts.
+      _statusController.add('$stream is already measuring.');
+      return;
+    }
+    if (error is PolarFeatureTimeoutException) {
+      (silent ? _statusController : _errorController).add(error.toString());
+      return;
+    }
+    final message = friendlyPolarError(error, stream: stream);
+    (silent ? _statusController : _errorController).add(message);
+  }
+
   /// Starts HR streaming. [silent] routes failures to [statusStream]
   /// instead of [errorStream] — used for automatic background retries
   /// (watchdog, auto-start-on-connect) so a SnackBar doesn't pop up every
@@ -438,7 +612,7 @@ class PolarRepository {
     try {
       await _waitForFeature(PolarSdkFeature.hr);
     } catch (e) {
-      (silent ? _statusController : _errorController).add(e.toString());
+      _emitStreamFailure('Heart rate', e, silent: silent);
       _hrStartInProgress = false;
       return;
     }
@@ -453,6 +627,7 @@ class PolarRepository {
       (data) {
         for (final sample in data.samples) {
           final tsMs = DateTime.now().millisecondsSinceEpoch;
+          _lastHrWallClockMs = tsMs;
           hrBuffer.add(tsMs, sample.hr.toDouble());
           final sensorSample = SensorSample(
             timestampMs: tsMs,
@@ -465,7 +640,7 @@ class PolarRepository {
       },
       onError: (Object e) {
         _hrStreaming = false;
-        _errorController.add('Heart rate stream error: $e');
+        _emitStreamFailure('Heart rate', e, silent: silent);
       },
       onDone: () => _hrStreaming = false,
     );
@@ -478,7 +653,7 @@ class PolarRepository {
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      (silent ? _statusController : _errorController).add(e.toString());
+      _emitStreamFailure('PPG', e, silent: silent);
       _ppgStartInProgress = false;
       return;
     }
@@ -492,7 +667,11 @@ class PolarRepository {
     _ppgSub = _polar.startPpgStreaming(deviceId).listen(
       (data) {
         for (final sample in data.samples) {
-          final tsMs = sample.timeStamp.millisecondsSinceEpoch;
+          // Phone clock for the live buffer and SQLite row. Polar PPG
+          // timestamps are often a different epoch; comparing them to
+          // DateTime.now() made the watchdog think a live stream was dead.
+          final tsMs = DateTime.now().millisecondsSinceEpoch;
+          _lastPpgWallClockMs = tsMs;
           if (sample.channelSamples.isNotEmpty) {
             ppgBuffer.add(tsMs, sample.channelSamples.first.toDouble());
           }
@@ -506,18 +685,18 @@ class PolarRepository {
       },
       onError: (Object e) {
         _ppgStreaming = false;
-        _errorController.add('PPG stream error: $e');
+        _emitStreamFailure('PPG', e, silent: silent);
       },
       onDone: () => _ppgStreaming = false,
     );
   }
 
-  Future<void> startAccStreaming() async {
+  Future<void> startAccStreaming({bool silent = false}) async {
     if (_connectedDeviceId == null || _accStreaming) return;
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      _errorController.add(e.toString());
+      (silent ? _statusController : _errorController).add(e.toString());
       return;
     }
     final deviceId = _connectedDeviceId;
@@ -527,7 +706,7 @@ class PolarRepository {
       (data) {
         for (final sample in data.samples) {
           final sensorSample = SensorSample(
-            timestampMs: sample.timeStamp.millisecondsSinceEpoch,
+            timestampMs: DateTime.now().millisecondsSinceEpoch,
             acc: [sample.x.toDouble(), sample.y.toDouble(), sample.z.toDouble()],
           );
           _liveSampleController.add(sensorSample);
@@ -536,18 +715,20 @@ class PolarRepository {
       },
       onError: (Object e) {
         _accStreaming = false;
-        _errorController.add('Accelerometer stream error: $e');
+        (silent ? _statusController : _errorController).add(
+          'Accelerometer stream error: $e',
+        );
       },
       onDone: () => _accStreaming = false,
     );
   }
 
-  Future<void> startGyroStreaming() async {
-    if (_connectedDeviceId == null || _gyroStreaming) return;
+  Future<void> startGyroStreaming({bool silent = false}) async {
+    if (_connectedDeviceId == null || _gyroStreaming || _gyroUnsupported) return;
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      _errorController.add(e.toString());
+      (silent ? _statusController : _errorController).add(e.toString());
       return;
     }
     final deviceId = _connectedDeviceId;
@@ -557,7 +738,7 @@ class PolarRepository {
       (data) {
         for (final sample in data.samples) {
           final sensorSample = SensorSample(
-            timestampMs: sample.timeStamp.millisecondsSinceEpoch,
+            timestampMs: DateTime.now().millisecondsSinceEpoch,
             gyro: [sample.x.toDouble(), sample.y.toDouble(), sample.z.toDouble()],
           );
           _liveSampleController.add(sensorSample);
@@ -566,18 +747,22 @@ class PolarRepository {
       },
       onError: (Object e) {
         _gyroStreaming = false;
-        _errorController.add('Gyroscope stream error: $e');
+        _gyroUnsupported = true;
+        (silent ? _statusController : _errorController).add(
+          'Gyroscope is not available on this connection. Polar lists it at '
+          '52 Hz in normal mode; the sensor may have rejected the start.',
+        );
       },
       onDone: () => _gyroStreaming = false,
     );
   }
 
-  Future<void> startMagnetometerStreaming() async {
-    if (_connectedDeviceId == null || _magStreaming) return;
+  Future<void> startMagnetometerStreaming({bool silent = false}) async {
+    if (_connectedDeviceId == null || _magStreaming || _magUnsupported) return;
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      _errorController.add(e.toString());
+      (silent ? _statusController : _errorController).add(e.toString());
       return;
     }
     final deviceId = _connectedDeviceId;
@@ -587,7 +772,7 @@ class PolarRepository {
       (data) {
         for (final sample in data.samples) {
           final sensorSample = SensorSample(
-            timestampMs: sample.timeStamp.millisecondsSinceEpoch,
+            timestampMs: DateTime.now().millisecondsSinceEpoch,
             mag: [sample.x.toDouble(), sample.y.toDouble(), sample.z.toDouble()],
           );
           _liveSampleController.add(sensorSample);
@@ -596,18 +781,22 @@ class PolarRepository {
       },
       onError: (Object e) {
         _magStreaming = false;
-        _errorController.add('Magnetometer stream error: $e');
+        _magUnsupported = true;
+        (silent ? _statusController : _errorController).add(
+          'Magnetometer is not available on this sensor. Verity Sense often '
+          'exposes only accelerometer (and gyro in SDK Mode).',
+        );
       },
       onDone: () => _magStreaming = false,
     );
   }
 
-  Future<void> startPpiStreaming() async {
-    if (_connectedDeviceId == null || _ppiStreaming) return;
+  Future<void> startPpiStreaming({bool silent = false}) async {
+    if (_connectedDeviceId == null || _ppiStreaming || _sdkModeEnabled) return;
     try {
       await _waitForFeature(PolarSdkFeature.onlineStreaming);
     } catch (e) {
-      _errorController.add(e.toString());
+      _emitStreamFailure('PPI', e, silent: silent);
       return;
     }
     final deviceId = _connectedDeviceId;
@@ -626,20 +815,30 @@ class PolarRepository {
       },
       onError: (Object e) {
         _ppiStreaming = false;
-        _errorController.add('PPI stream error: $e');
+        _emitStreamFailure('PPI', e, silent: silent);
       },
       onDone: () => _ppiStreaming = false,
     );
   }
 
-  Future<String> startLocalSession(String name, String dataTypes) async {
+  Future<void> stopPpiStreaming() async {
+    await _ppiSub?.cancel();
+    _ppiSub = null;
+    _ppiStreaming = false;
+  }
+
+  Future<String> startLocalSession(String name, [String? dataTypes]) async {
+    await startAllAvailableStreams(silent: true);
+    if (_recordPpi && !_sdkModeEnabled) {
+      unawaited(startPpiStreaming(silent: true));
+    }
     final sessionId = _uuid.v4();
     final session = RecordingSession(
       id: sessionId,
       deviceId: _connectedDeviceId ?? 'unknown',
       name: name,
       startTimeMs: DateTime.now().millisecondsSinceEpoch,
-      dataTypes: dataTypes,
+      dataTypes: dataTypes ?? activeRecordingTypes,
       source: SessionSource.liveApp,
     );
     await _db.insertSession(session);
@@ -653,6 +852,8 @@ class PolarRepository {
   Future<void> stopLocalSession() async {
     _flushTimer?.cancel();
     await _flushSessionBuffer();
+    // Dedicated PPI stream slows live HR to ~5s. Stop it after the take
+    // so watching Live stays at ~1 Hz; RR intervals on HR packets remain.
     if (_currentSessionId != null) {
       final count = await _db.getSampleCount(_currentSessionId!);
       await _db.updateSessionSampleCount(
@@ -662,6 +863,7 @@ class PolarRepository {
       );
     }
     _currentSessionId = null;
+    await stopPpiStreaming();
     _sessionsChangedController.add(null);
   }
 
@@ -671,19 +873,41 @@ class PolarRepository {
     if (_currentSessionId == null) return;
     _sessionBuffer.add(sample);
     if (_sessionBuffer.length >= 100) {
-      _flushSessionBuffer();
+      unawaited(_flushSessionBuffer());
     }
   }
 
-  Future<void> _flushSessionBuffer() async {
+  Future<void> _flushSessionBuffer() {
+    final previous = _flushLock;
+    final gate = Completer<void>();
+    _flushLock = gate.future;
+    return previous.then((_) => _flushSessionBufferUnlocked()).whenComplete(gate.complete);
+  }
+
+  Future<void> _flushSessionBufferUnlocked() async {
     if (_currentSessionId == null || _sessionBuffer.isEmpty) return;
+    final sessionId = _currentSessionId!;
     final samples = List<SensorSample>.from(_sessionBuffer);
     _sessionBuffer.clear();
-    await _db.insertSamples(_currentSessionId!, samples);
+    try {
+      await _db.insertSamples(sessionId, samples);
+    } catch (e) {
+      if (_currentSessionId == sessionId) {
+        _sessionBuffer.insertAll(0, samples);
+      }
+      if (!_statusController.isClosed) {
+        _statusController.add('Could not save samples to the phone. Will retry.');
+      }
+    }
   }
 
   Future<void> deleteSession(String sessionId) async {
     await _db.deleteSession(sessionId);
+    _sessionsChangedController.add(null);
+  }
+
+  Future<void> deleteAllSessions() async {
+    await _db.deleteAllSessions();
     _sessionsChangedController.add(null);
   }
 
@@ -733,6 +957,7 @@ class PolarRepository {
     _flushTimer?.cancel();
     _watchdogTimer?.cancel();
     _reconnectTimer?.cancel();
+    unawaited(_flushSessionBuffer());
     _cancelAllStreamSubs();
     _deviceFoundController.close();
     _connectionStateController.close();

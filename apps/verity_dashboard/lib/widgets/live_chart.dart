@@ -1,5 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import '../charts/chart_math.dart';
 import '../models/time_series_buffer.dart';
 
 /// A time-anchored line chart. Unlike a naive "append and trim" chart, the
@@ -11,7 +12,7 @@ class LiveChart extends StatelessWidget {
   final String title;
   final Color color;
   final ChartTimeframe timeframe;
-  final (double, double)? yRange;
+  final ChartAxisRange? yRange;
   final String? unit;
   final double? height;
 
@@ -34,6 +35,8 @@ class LiveChart extends StatelessWidget {
         final chartHeight = height ??
             (constraints.maxWidth * (isWide ? 0.28 : 0.45)).clamp(140.0, 260.0);
         final windowSeconds = timeframe.window.inSeconds.toDouble();
+        final xInterval = liveXInterval(windowSeconds);
+        final last = spots.isEmpty ? null : spots.last.y;
 
         return Card(
           child: Padding(
@@ -50,9 +53,12 @@ class LiveChart extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    if (last != null) ...[
+                      _LeanValueChip(value: last, unit: unit, color: color),
+                      const SizedBox(width: 8),
+                    ],
                     Text(
-                      'last ${timeframe.window.inSeconds < 60 ? '${timeframe.window.inSeconds}s' : '${timeframe.window.inMinutes}m'}',
+                      'last ${formatWindowLabel(timeframe.window)}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ],
@@ -67,14 +73,12 @@ class LiveChart extends StatelessWidget {
                           LineChartData(
                             minX: -windowSeconds,
                             maxX: 0,
-                            minY: yRange?.$1,
-                            maxY: yRange?.$2,
+                            minY: yRange?.min,
+                            maxY: yRange?.max,
                             gridData: FlGridData(
                               show: true,
                               drawVerticalLine: false,
-                              horizontalInterval: yRange != null
-                                  ? ((yRange!.$2 - yRange!.$1) / 3).clamp(0.5, double.infinity)
-                                  : null,
+                              horizontalInterval: yRange?.interval,
                               getDrawingHorizontalLine: (_) => FlLine(
                                 color: Colors.white.withValues(alpha: 0.06),
                                 strokeWidth: 1,
@@ -86,26 +90,77 @@ class LiveChart extends StatelessWidget {
                               leftTitles: AxisTitles(
                                 sideTitles: SideTitles(
                                   showTitles: true,
-                                  reservedSize: 36,
-                                  getTitlesWidget: (value, meta) => Text(
-                                    value.toStringAsFixed(0),
-                                    style: const TextStyle(fontSize: 10, color: Colors.white54),
-                                  ),
+                                  reservedSize: 44,
+                                  interval: yRange?.interval,
+                                  getTitlesWidget: (value, meta) {
+                                    if (yRange != null &&
+                                        !_onTick(value, yRange!.interval)) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return SideTitleWidget(
+                                      axisSide: meta.axisSide,
+                                      space: 6,
+                                      child: Text(
+                                        formatAxisTick(value),
+                                        maxLines: 1,
+                                        style: const TextStyle(fontSize: 10, color: Colors.white70),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                               bottomTitles: AxisTitles(
                                 sideTitles: SideTitles(
                                   showTitles: true,
-                                  reservedSize: 20,
-                                  interval: windowSeconds / 3,
-                                  getTitlesWidget: (value, meta) => Text(
-                                    '${value.toStringAsFixed(0)}s',
-                                    style: const TextStyle(fontSize: 10, color: Colors.white54),
-                                  ),
+                                  reservedSize: 22,
+                                  interval: xInterval,
+                                  getTitlesWidget: (value, meta) {
+                                    if (!_onTick(value, xInterval) &&
+                                        value > meta.min + 0.01 &&
+                                        value < meta.max - 0.01) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return SideTitleWidget(
+                                      axisSide: meta.axisSide,
+                                      space: 4,
+                                      child: Text(
+                                        formatLiveAgo(value),
+                                        maxLines: 1,
+                                        style: const TextStyle(fontSize: 10, color: Colors.white70),
+                                      ),
+                                    );
+                                  },
                                 ),
                               ),
                             ),
                             borderData: FlBorderData(show: false),
+                            lineTouchData: LineTouchData(
+                              enabled: true,
+                              handleBuiltInTouches: true,
+                              touchTooltipData: LineTouchTooltipData(
+                                maxContentWidth: 220,
+                                fitInsideHorizontally: true,
+                                fitInsideVertically: true,
+                                tooltipRoundedRadius: 8,
+                                getTooltipColor: (_) =>
+                                    color.withValues(alpha: 0.92),
+                                getTooltipItems: (touched) => [
+                                  for (final t in touched)
+                                    LineTooltipItem(
+                                      formatTouchTooltip(
+                                        y: t.y,
+                                        unit: unit,
+                                        when: formatLiveAgo(t.x),
+                                      ),
+                                      const TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
                             lineBarsData: [
                               LineChartBarData(
                                 spots: spots,
@@ -127,6 +182,46 @@ class LiveChart extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+bool _onTick(double value, double interval) {
+  if (interval <= 0 || !value.isFinite) return true;
+  final n = (value / interval).roundToDouble();
+  return (value - n * interval).abs() < interval * 0.02 + 1e-6;
+}
+
+class _LeanValueChip extends StatelessWidget {
+  final double value;
+  final String? unit;
+  final Color color;
+
+  const _LeanValueChip({
+    required this.value,
+    required this.color,
+    this.unit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = unit == null || unit!.isEmpty
+        ? formatLeanValue(value)
+        : '${formatLeanValue(value)} $unit';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.22),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     );
   }
 }

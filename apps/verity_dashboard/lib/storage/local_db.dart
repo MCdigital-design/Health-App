@@ -1,18 +1,35 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import '../charts/chart_math.dart';
 import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
+
+enum ChartSignal { hr, ppg, ppi, acc, gyro, mag }
+
+extension ChartSignalColumn on ChartSignal {
+  String get column => switch (this) {
+        ChartSignal.hr => 'hr',
+        ChartSignal.ppg => 'ppg',
+        ChartSignal.ppi => 'ppi',
+        ChartSignal.acc => 'acc',
+        ChartSignal.gyro => 'gyro',
+        ChartSignal.mag => 'mag',
+      };
+}
 
 class LocalDb {
   static final LocalDb instance = LocalDb._internal();
   static Database? _db;
+
+  /// Override in tests so parallel test isolates do not lock one file.
+  static String databaseFileName = 'verity_dashboard.db';
 
   /// Bump when the schema changes. Migrations run in [_onUpgrade] so
   /// existing installs keep their data — sessions/samples are stored in the
   /// app's private SQLite database, which survives app restarts and
   /// in-place APK updates (it is only lost if the app is uninstalled or the
   /// user clears app storage from Android settings).
-  static const int _schemaVersion = 2;
+  static const int _schemaVersion = 3;
 
   LocalDb._internal();
 
@@ -24,10 +41,14 @@ class LocalDb {
 
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'verity_dashboard.db');
+    final path = join(dbPath, databaseFileName);
     return openDatabase(
       path,
       version: _schemaVersion,
+      onConfigure: (db) async {
+        await db.execute('PRAGMA foreign_keys = ON');
+        await db.rawQuery('PRAGMA journal_mode = WAL');
+      },
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE sessions(
@@ -57,6 +78,7 @@ class LocalDb {
         ''');
         await db.execute('CREATE INDEX idx_samples_session ON samples(session_id)');
         await db.execute('CREATE INDEX idx_samples_session_time ON samples(session_id, timestamp_ms)');
+        await _createAiDashboards(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -66,6 +88,9 @@ class LocalDb {
           await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_samples_session_time ON samples(session_id, timestamp_ms)',
           );
+        }
+        if (oldVersion < 3) {
+          await _createAiDashboards(db);
         }
       },
     );
@@ -106,7 +131,11 @@ class LocalDb {
     await batch.commit(noResult: true);
   }
 
-  Future<List<SensorSample>> getSamples(String sessionId, {int limit = 5000}) async {
+  /// Full session rows. Do not silently cap this — the previous default of
+  /// 5,000 dropped later HR rows whenever PPG (tens of Hz) filled the
+  /// first page, which is why session detail showed "No data" for heart
+  /// rate on a recording that had hundreds of HR samples.
+  Future<List<SensorSample>> getSamples(String sessionId, {int? limit}) async {
     final db = await database;
     final maps = await db.query(
       'samples',
@@ -116,6 +145,57 @@ class LocalDb {
       limit: limit,
     );
     return maps.map((m) => SensorSample.fromMap(m)).toList();
+  }
+
+  Future<List<SensorSample>> getSamplesWithSignal(
+    String sessionId,
+    ChartSignal signal, {
+    int? limit,
+  }) async {
+    final db = await database;
+    final column = signal.column;
+    final maps = await db.query(
+      'samples',
+      where: 'session_id = ? AND $column IS NOT NULL',
+      whereArgs: [sessionId],
+      orderBy: 'timestamp_ms ASC',
+      limit: limit,
+    );
+    return maps.map((m) => SensorSample.fromMap(m)).toList();
+  }
+
+  /// Chart-ready elapsed-second series for one signal. Queries only that
+  /// column so a 40k-row PPG dump cannot hide 1 Hz HR.
+  Future<List<TimeValue>> getChartSeries({
+    required String sessionId,
+    required ChartSignal signal,
+    required int sessionStartMs,
+  }) async {
+    final samples = await getSamplesWithSignal(sessionId, signal);
+    final pairs = <(int, double)>[];
+    for (final s in samples) {
+      switch (signal) {
+        case ChartSignal.hr:
+          if (s.hr != null) pairs.add((s.timestampMs, s.hr!.toDouble()));
+        case ChartSignal.ppg:
+          final v = s.ppgChannel0;
+          if (v != null) pairs.add((s.timestampMs, v));
+        case ChartSignal.ppi:
+          for (final rr in s.ppi ?? const <int>[]) {
+            pairs.add((s.timestampMs, rr.toDouble()));
+          }
+        case ChartSignal.acc:
+          final v = s.accMagnitude;
+          if (v != null) pairs.add((s.timestampMs, v));
+        case ChartSignal.gyro:
+          final v = s.gyroMagnitude;
+          if (v != null) pairs.add((s.timestampMs, v));
+        case ChartSignal.mag:
+          final v = s.magMagnitude;
+          if (v != null) pairs.add((s.timestampMs, v));
+      }
+    }
+    return elapsedSeries(samples: pairs, sessionStartMs: sessionStartMs);
   }
 
   Future<int> getSampleCount(String sessionId) async {
@@ -136,11 +216,11 @@ class LocalDb {
       SELECT
         COUNT(*) as total,
         COUNT(hr) as hr,
-        COUNT(ppg) as ppg,
-        COUNT(ppi) as ppi,
-        COUNT(acc) as acc,
-        COUNT(gyro) as gyro,
-        COUNT(mag) as mag
+        COUNT(CASE WHEN ppg IS NOT NULL AND length(ppg) > 0 THEN 1 END) as ppg,
+        COUNT(CASE WHEN ppi IS NOT NULL AND length(ppi) > 0 THEN 1 END) as ppi,
+        COUNT(CASE WHEN acc IS NOT NULL AND length(acc) > 0 THEN 1 END) as acc,
+        COUNT(CASE WHEN gyro IS NOT NULL AND length(gyro) > 0 THEN 1 END) as gyro,
+        COUNT(CASE WHEN mag IS NOT NULL AND length(mag) > 0 THEN 1 END) as mag
       FROM samples WHERE session_id = ?
     ''', [sessionId]);
     if (rows.isEmpty) return SessionSampleCounts.empty;
@@ -189,5 +269,72 @@ class LocalDb {
     final db = await database;
     await db.delete('samples', where: 'session_id = ?', whereArgs: [sessionId]);
     await db.delete('sessions', where: 'id = ?', whereArgs: [sessionId]);
+  }
+
+  /// Close recordings that were still open when the process died
+  /// (force-stop, crash, battery death). Uses the last sample time so
+  /// duration stays honest.
+  Future<int> finalizeOrphanedSessions({int? nowMs}) async {
+    final db = await database;
+    final orphans = await db.query(
+      'sessions',
+      where: 'end_time_ms IS NULL',
+      columns: ['id', 'start_time_ms'],
+    );
+    for (final row in orphans) {
+      final id = row['id'] as String;
+      final start = row['start_time_ms'] as int? ??
+          nowMs ??
+          DateTime.now().millisecondsSinceEpoch;
+      final last = await db.rawQuery(
+        'SELECT MAX(timestamp_ms) as t FROM samples WHERE session_id = ?',
+        [id],
+      );
+      // Prefer last sample so a crash does not stretch duration to relaunch.
+      final end = last.first['t'] as int? ?? start;
+      final count = await getSampleCount(id);
+      await updateSessionSampleCount(id, count, endTimeMs: end);
+    }
+    return orphans.length;
+  }
+
+  Future<void> deleteAllSessions() async {
+    final db = await database;
+    await db.delete('samples');
+    await db.delete('sessions');
+  }
+
+  /// On-disk estimate for every session, one query.
+  Future<Map<String, int>> estimateAllSessionBytes() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT
+        session_id,
+        COALESCE(SUM(LENGTH(CAST(hr AS TEXT))), 0) +
+        COALESCE(SUM(LENGTH(ppi)), 0) +
+        COALESCE(SUM(LENGTH(ppg)), 0) +
+        COALESCE(SUM(LENGTH(acc)), 0) +
+        COALESCE(SUM(LENGTH(gyro)), 0) +
+        COALESCE(SUM(LENGTH(mag)), 0) +
+        (COUNT(*) * 16) as bytes
+      FROM samples
+      GROUP BY session_id
+    ''');
+    return {
+      for (final r in rows)
+        (r['session_id'] as String): (r['bytes'] as int? ?? 0),
+    };
+  }
+
+  static Future<void> _createAiDashboards(Database db) {
+    return db.execute('''
+      CREATE TABLE IF NOT EXISTS ai_dashboards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        spec_json TEXT NOT NULL,
+        created_ms INTEGER NOT NULL,
+        account_hint TEXT
+      )
+    ''');
   }
 }

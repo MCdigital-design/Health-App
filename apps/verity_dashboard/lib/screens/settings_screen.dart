@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../polar/accesslink_service.dart';
 import '../polar/polar_repository.dart';
+import '../widgets/collapsible_hint.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -16,6 +17,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String? _connectedDeviceId;
   bool _sdkMode = false;
   bool _autoReconnect = false;
+  bool _recordAccel = true;
+  bool _recordGyro = true;
+  bool _recordMag = true;
+  bool _recordPpi = true;
   bool _scanning = false;
   StreamSubscription? _deviceSub;
   StreamSubscription? _connSub;
@@ -40,6 +45,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _connectedDeviceId = repo.connectedDeviceId;
     _sdkMode = repo.isSdkModeOn;
     _autoReconnect = repo.autoReconnectEnabled;
+    _recordAccel = repo.recordAccel;
+    _recordGyro = repo.recordGyro;
+    _recordMag = repo.recordMag;
+    _recordPpi = repo.recordPpi;
     _deviceSub = repo.deviceFoundStream.listen((device) {
       if (!_foundDevices.any((d) => d.deviceId == device.deviceId)) {
         setState(() => _foundDevices.add(device));
@@ -61,7 +70,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _errorSub = repo.errorStream.listen((message) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), duration: const Duration(seconds: 5)),
+        SnackBar(
+          content: Text(message, maxLines: 2, overflow: TextOverflow.ellipsis),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
       );
     });
     _statusSub = repo.statusStream.listen((message) {
@@ -296,6 +309,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 16),
           Card(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  title: const Text('Accelerometer'),
+                  subtitle: const Text('On. Polar default 52 Hz, 8 g. ~15 MB/hour.'),
+                  value: _recordAccel,
+                  onChanged: (v) async {
+                    setState(() => _recordAccel = v);
+                    await repo.setRecordAccel(v);
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('Gyroscope'),
+                  subtitle: const Text('On. Polar lists 52 Hz in normal mode — SDK Mode is not required.'),
+                  value: _recordGyro,
+                  onChanged: (v) async {
+                    setState(() => _recordGyro = v);
+                    await repo.setRecordGyro(v);
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('Magnetometer'),
+                  subtitle: const Text('On. Started if the sensor offers it; ignored if it does not.'),
+                  value: _recordMag,
+                  onChanged: (v) async {
+                    setState(() => _recordMag = v);
+                    await repo.setRecordMag(v);
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('PPI while recording'),
+                  subtitle: const Text(
+                    'Polar’s beat-to-beat stream for HRV. While it runs, live BPM '
+                    'updates about every 5 seconds. We still compute HRV from RR '
+                    'intervals on the HR packets either way.',
+                  ),
+                  value: _recordPpi,
+                  onChanged: (v) async {
+                    setState(() => _recordPpi = v);
+                    await repo.setRecordPpi(v);
+                  },
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -312,13 +372,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Imports exercises already uploaded to your Polar Flow account, including ones '
-                    'no longer on the sensor itself. Requires your own free API client from '
-                    'admin.polaraccesslink.com — this cannot be set up on your behalf, since it '
-                    'needs your Polar account login.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'How Polar Flow import works',
+                    body:
+                        'Imports exercises already uploaded to your Polar Flow account, including ones '
+                        'no longer on the sensor itself. Requires your own free API client from '
+                        'admin.polaraccesslink.com — this cannot be set up on your behalf, since it '
+                        'needs your Polar account login.',
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -351,10 +411,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  Text(
-                    'After approving in the browser, it will redirect to a URL that fails to load '
-                    '(that\'s expected) — copy that full URL from the address bar and paste it below.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                  const CollapsibleHint(
+                    label: 'After you approve in the browser',
+                    body:
+                        'The redirect URL will fail to load — that is expected. Copy that full URL '
+                        'from the address bar and paste it below.',
                   ),
                   const SizedBox(height: 8),
                   TextField(
@@ -390,10 +451,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Text('Storage and privacy', style: Theme.of(context).textTheme.titleMedium),
+                  const CollapsibleHint(
+                    label: 'What stays on this phone',
+                    body:
+                        'Recordings stay in a SQLite file on this phone. They are not uploaded '
+                        'to GitHub and they do not sync to Polar Flow. Heart-rate and PPG are '
+                        'health data — do not put them in a public repository.\n\n'
+                        'Delete one session from its detail screen (trash icon), or remove every '
+                        'recording below. Uninstalling the app also deletes the database.',
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (ctx) => AlertDialog(
+                          title: const Text('Delete every recording on this phone?'),
+                          content: const Text(
+                            'This only clears Verity Dashboard storage. Polar Flow and the '
+                            'official Polar app are not changed. This cannot be undone.',
+                          ),
+                          actions: [
+                            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                            TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete all')),
+                          ],
+                        ),
+                      );
+                      if (ok != true) return;
+                      await repo.deleteAllSessions();
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('All local recordings deleted')),
+                      );
+                    },
+                    icon: const Icon(Icons.delete_sweep),
+                    label: const Text('Delete all recordings on this phone'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text('About', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('Verity Dashboard v1.1.0'),
+                  const Text('Verity Dashboard v1.2.7'),
                   const Text('Offline-first Polar Verity Sense client'),
+                  const CollapsibleHint(
+                    label: 'Not a medical device',
+                    body:
+                        'Personal fitness display only — not a medical device. '
+                        'Keep the app on-screen while recording; Android may pause '
+                        'Bluetooth if the screen is locked. Recordings stay on this '
+                        'phone and are not backed up to Google. Optional ChatGPT '
+                        'uses whoever signs in on this phone and the models that '
+                        'account can use. A session brief (Compact / Standard / Full) '
+                        'is sent only when you ask — not the raw 40k-row PPG table.',
+                  ),
                 ],
               ),
             ),

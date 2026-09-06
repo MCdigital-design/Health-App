@@ -107,13 +107,29 @@ the buffer on a fixed 500ms timer. Chart animation duration is set to zero
 so each throttled redraw is instant rather than competing with the next
 tick's animation.
 
-**New feature — timeframe selector:** `ChartTimeframe` defines
-Real-time/1s/5s/30s/1m/5m windows, each with a bucket size. Windows above
-"real-time" average raw samples into fixed-size buckets
-(`TimeSeriesBuffer.spotsForTimeframe`), so a 5-minute view of 55 Hz PPG
-data renders a few dozen points, not tens of thousands. Tested in
-`time_series_buffer_test.dart` (`aggregates into buckets for larger
-timeframes, reducing point count`).
+**New feature — timeframe selector:** `ChartTimeframe` chips name the
+*visible window* (Real-time / 30s / 2m / 10m / 30m / 2h). The old labels
+(1s / 5s / 30s / 1m / 5m) were bucket sizes, so a selected "30s" chip
+drew a 10-minute chart. Larger windows still average raw samples into
+buckets (`TimeSeriesBuffer.spotsForTimeframe`). Tested in
+`time_series_buffer_test.dart`.
+
+**Live screenshot follow-up (v1.2.1):** Y ticks no longer append the raw
+sample max (`164`, `360680`); X uses `now` / `-10m` instead of `-600s`;
+the last sample's full value sits in a colored chip; PPG watchdog uses
+phone wall-clock so it does not restart a healthy stream and raise
+`ERROR_ALREADY_IN_STATE`.
+
+**Session PPG negative X (v1.2.3):** Polar timestamps ~50 minutes behind
+the phone were treated as the session clock (1-hour slack). Charts now
+rebase to the first sample and label X with wall-clock time
+(13:00 + 20 min → `13:20`). The word `raw` is not shown.
+
+**Verity Sense capture (official Polar SDK):** HR, PPG, PPI, ACC 52 Hz,
+gyro 52 Hz, magnetometer. No ECG / GPS / temperature on this sensor.
+SDK Mode is left off (it disables HR and PPI). New recordings start
+HR+PPG+ACC+gyro+mag, plus PPI for the take. HRV (RMSSD/SDNN/pNN50) is
+calculated from stored beat intervals.
 
 **New feature — adaptive chart:** `LiveChart` uses `LayoutBuilder` to size
 itself relative to available width (clamped 140–260px), switches to a
@@ -163,14 +179,26 @@ explicit explanation when HR is zero but other signals aren't.
 | Is anything actually saved? | Yes — SQLite, on disk, since before this audit. |
 | Only held in memory? | No. Flushed every 2s during recording and on stop. |
 | Can sessions be stored locally? | Yes, already the only mechanism. |
-| Estimated storage per hour | HR only (~1 Hz): ~150–200 KB/hour. PPG (~55 Hz, 2 channels): ~14–18 MB/hour — this dominates total size. ACC/gyro/mag @52Hz add roughly similar per-hour cost each if enabled simultaneously. |
+| Estimated storage per hour | HR only (~1 Hz): ~150–200 KB/hour. PPG (~42–55 Hz): ~6–18 MB/hour — this dominates total size. ACC @50 Hz adds roughly ~15 MB/hour if enabled. Gyro/mag similar if they actually stream. |
+| Condensed or full table? | Full table. One SQLite row per sample, text-encoded channel lists. Charts downsample only for drawing. |
 | Need a backend/VPS/DB? | No. This is single-user, single-device. A server only becomes justified for multi-device sync, multi-user access, or off-device backup — none apply here. |
+| Upload to GitHub? | No. Heart-rate and PPG are health data. This repo is public. CSV export stays on the phone. |
+| Sync to Polar official app? | No. Live recordings are a one-way BLE stream into this app. Polar Flow only sees button-press exercises if the sensor is paired with a Polar account. |
+| How to delete | Session detail trash icon, Settings → Delete all recordings, or uninstall / clear app storage. |
 | Local-first, sync later? | Recommended as-is. If cross-device access is ever needed, Polar Flow's own cloud (already integrated, §6) or a simple file-sync of the SQLite database is far less work than standing up a backend. |
 
 **New feature:** session detail screen
-(`lib/screens/session_detail_screen.dart`) — full charts, per-type sample
-counts, an on-disk size estimate, delete, and CSV export (written to the
-app's external files directory, path shown to the user).
+(`lib/screens/session_detail_screen.dart`) — interactive time charts
+(pinch/drag/zoom with elapsed-time X and adaptive Y), per-type sample
+counts, an on-disk size estimate with hourly projection, delete, and CSV
+export (written to the app's external files directory, path shown to the
+user).
+
+**Bug found and fixed — session HR chart said "No data" while counts showed
+hundreds of HR samples:** `getSamples` silently limited to 5,000 rows
+ordered by timestamp. Polar PPG timestamps can sort entirely before
+phone-clock HR rows, so the first page was all PPG. Charts now query each
+signal separately and plot elapsed seconds, not row index.
 
 **Manual test checklist:**
 
@@ -285,3 +313,81 @@ history):**
   offline-recording file API (2.1.0+ firmware feature); on-device history
   import is limited to the exercise-entry API, which is what Polar Flow
   itself also uses for this sensor.
+
+## 8. Final VM production audit (v1.2.4)
+
+Ran on the Cloud Agent VM (Flutter 3.47.2, Java 21, no physical BLE).
+
+### Automated gate
+
+Recorded after the VM run in this audit (see commit / PR notes if a
+row is still pending).
+
+| Check | Result |
+|---|---|
+| `flutter analyze` | Clean (0 issues) |
+| `flutter test --concurrency=1 --timeout 30s` | **43/43 passed** (includes 3 new orphan-session tests) |
+| Release APK zip-aligned + signed | OK. v2+v3. Same cert as v1.2.3 (`ddf50be77a5c…ddb3c6`, expires 2054) |
+| `aapt dump badging` | `com.example.verity_dashboard` **1.2.4 (11)**, minSdk 26, targetSdk 36 |
+| BLE permissions in merged manifest | SCAN / CONNECT / legacy BLUETOOTH (+ location maxSdk 30) |
+| Backup | `allowBackup=false`, `@xml/backup_rules`, `@xml/data_extraction_rules` |
+| SHA256 | `c836f035b71558b3cd5cd8c1e5aae17878fac7412e34de7654f9d9ff689bf4a3` |
+
+### Blockers found on this pass and fixed in v1.2.4
+
+- Recording flush cleared the in-memory buffer **before** SQLite insert.
+  A failed write dropped those samples. Insert is now tried first-restore
+  on failure, and concurrent timer/size flushes are serialized.
+- Force-stop / crash left `sessions.end_time_ms` NULL. Launch now
+  finalizes orphans at the last sample time (not "now", so duration
+  stays honest).
+- Session `data_types` was snapshotted from stream flags that were not
+  set yet (`hr,ppg` while motion/PPI were intended). Types now come
+  from the user's settings (and omit HR/PPI when SDK Mode is on).
+- `android:allowBackup` was on, so Google Backup could have copied the
+  health SQLite and Polar Flow tokens. Backup and device-transfer of
+  app data are now denied.
+- Uncaught Flutter / platform errors had no handler.
+- App pause / lock / BLE drop did not flush the 2-second write buffer.
+- Polar Flow error SnackBars could show raw HTTP bodies (token JSON).
+  Failures now report the status code only.
+
+### Accepted for personal sideload — not Play Store ready
+
+| Item | Why it is accepted |
+|---|---|
+| `applicationId` `com.example.verity_dashboard` | Changing it would force uninstall and lose local recordings |
+| Sideload keystore passwords in `build.gradle.kts` | Personal sideload only; same key is required for updates |
+| Polar Flow client secret in SharedPreferences | Stays on-device; backup of prefs is now blocked |
+| No Android foreground service | Polar plugin has none. Lock-screen / background BLE can stall. Keep the app on-screen while recording. Do not add an untested FGS here. |
+| No physical BLE / Polar Flow live account on this VM | Hardware checklist in §§1–6 still applies |
+| Not a medical device | Settings → About states this |
+
+### Verdict
+
+**Sideload-ready for personal use** after installing v1.2.4 over the
+previous build (same signing key). **Not Play-Store-ready.** Confirm
+on the phone: Record → force-stop → relaunch (session closed, samples
+kept); lock screen for 60s during Record (expect possible BLE stall,
+samples flushed up to the pause); SDK Mode off for live HR.
+
+## 9. 16-minute vs 25-minute size (v1.2.5)
+
+No samples need to be sent. The session screens already show the cause.
+
+| Take | Duration | Rows | Size | What was stored |
+|---|---|---|---|---|
+| Sep 5 00:44 | 16m 27s | 42,363 | 1.71 MB | HR 987 + **PPG 41,376** + PPI 987 |
+| Sep 5 13:33 | 25m 39s | 1,540 | 28.5 KB | HR 1,540 + PPI 1,540 + **PPG 0** |
+
+There is **no compression**. PPG is ~40 Hz. 16 minutes × 40 × 60 ≈ 38,400
+rows — that is the 1.71 MB file. Heart rate is ~1 Hz, so 25 minutes is
+~1,500 rows and tens of KB. Motion was zero on both older takes.
+
+HRV “Beats 0” on the 25-minute take: Polar often omits RR on optical HR.
+An empty PPI list was stored as `""`, which counted as PPI but produced
+no intervals. Empty lists now store NULL; RMSSD still needs real RR/PPI.
+
+ChatGPT device-code login (`auth.openai.com/codex/device`) was implemented
+in the AI tab. The usercode endpoint returned HTTP 200 from this VM.
+Sending a real question still needs the user’s ChatGPT approval on a phone.

@@ -62,7 +62,25 @@ void main() {
       buffer.add(1000, 70.0);
       final range = buffer.yRangeForTimeframe(ChartTimeframe.realtime, now: 1000);
       expect(range, isNotNull);
-      expect(range!.$2, greaterThan(range.$1));
+      expect(range!.max, greaterThan(range.min));
+    });
+
+    test('yRangeForTimeframe snaps off the raw sample max', () {
+      final buffer = TimeSeriesBuffer();
+      final now = 600000;
+      buffer.add(now - 180000, 160.0);
+      buffer.add(now, 125.0);
+      final range = buffer.yRangeForTimeframe(ChartTimeframe.s30, now: now);
+      expect(range, isNotNull);
+      expect(range!.max, isNot(164));
+      expect(range.max % range.interval, 0);
+      expect(range.min % range.interval, 0);
+    });
+
+    test('timeframe chips name the visible window, not the bucket', () {
+      expect(ChartTimeframe.s1.label, '30s');
+      expect(ChartTimeframe.s30.label, '10m');
+      expect(ChartTimeframe.s30.window, const Duration(minutes: 10));
     });
 
     test('returns empty spots for an empty buffer instead of throwing', () {

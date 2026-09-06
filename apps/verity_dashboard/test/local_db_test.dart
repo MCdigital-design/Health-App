@@ -11,6 +11,7 @@ void main() {
   setUpAll(() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
+    LocalDb.databaseFileName = 'verity_local_db_test.db';
   });
 
   group('LocalDb', () {
@@ -103,6 +104,26 @@ void main() {
       await db.deleteSession(id);
     });
 
+    test('empty PPI list does not count as a beat-interval row', () async {
+      final db = LocalDb.instance;
+      final id = 'test-empty-ppi-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'HrOnly',
+        startTimeMs: 1000,
+        dataTypes: 'hr',
+      ));
+      await db.insertSamples(id, [
+        SensorSample(timestampMs: 1, hr: 70, ppi: []),
+        SensorSample(timestampMs: 2, hr: 72),
+      ]);
+      final counts = await db.getSampleTypeCounts(id);
+      expect(counts.hr, 2);
+      expect(counts.ppi, 0);
+      await db.deleteSession(id);
+    });
+
     test('sessionExistsForExternalId prevents duplicate imports', () async {
       final db = LocalDb.instance;
       final id = 'polarflow:test-${_uuid.v4()}';
@@ -120,6 +141,128 @@ void main() {
       expect(await db.sessionExistsForExternalId(id), isTrue);
       await db.deleteSession(id);
       expect(await db.sessionExistsForExternalId(id), isFalse);
+    });
+
+    test('getChartSeries still finds HR when PPG timestamps sort first', () async {
+      final db = LocalDb.instance;
+      final id = 'test-hr-not-lost-${_uuid.v4()}';
+      const start = 1_700_000_000_000;
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'MixedClocks',
+        startTimeMs: start,
+        dataTypes: 'hr,ppg',
+      ));
+      final samples = <SensorSample>[
+        for (var i = 0; i < 6000; i++)
+          SensorSample(timestampMs: 946684800000 + i, ppg: [300000 + i]),
+        for (var i = 0; i < 20; i++)
+          SensorSample(timestampMs: start + i * 1000, hr: 60 + i),
+      ];
+      await db.insertSamples(id, samples);
+
+      final limited = await db.getSamples(id, limit: 5000);
+      expect(limited.every((s) => s.hr == null), isTrue);
+
+      final hr = await db.getChartSeries(
+        sessionId: id,
+        signal: ChartSignal.hr,
+        sessionStartMs: start,
+      );
+      expect(hr.length, 20);
+      expect(hr.first.value, 60);
+
+      final ppg = await db.getChartSeries(
+        sessionId: id,
+        signal: ChartSignal.ppg,
+        sessionStartMs: start,
+      );
+      expect(ppg.length, 6000);
+      expect(ppg.first.seconds, 0);
+
+      await db.deleteSession(id);
+    });
+
+    test('deleteAllSessions clears every session and sample', () async {
+      final db = LocalDb.instance;
+      final id = 'test-all-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'All',
+        startTimeMs: 1000,
+        dataTypes: 'hr',
+      ));
+      await db.insertSamples(id, [SensorSample(timestampMs: 1, hr: 70)]);
+      await db.deleteAllSessions();
+      expect(await db.getSession(id), isNull);
+      expect(await db.getSampleCount(id), 0);
+    });
+
+    test('finalizeOrphanedSessions closes open recordings at last sample', () async {
+      final db = LocalDb.instance;
+      final id = 'test-orphan-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'Orphan',
+        startTimeMs: 1000,
+        dataTypes: 'hr,ppg',
+      ));
+      await db.insertSamples(id, [
+        SensorSample(timestampMs: 2000, hr: 70),
+        SensorSample(timestampMs: 5000, hr: 72),
+      ]);
+      expect((await db.getSession(id))!.endTimeMs, isNull);
+
+      final n = await db.finalizeOrphanedSessions(nowMs: 99000);
+      expect(n, 1);
+      final session = await db.getSession(id);
+      expect(session!.endTimeMs, 5000);
+      expect(session.sampleCount, 2);
+      expect(session.duration, const Duration(milliseconds: 4000));
+
+      await db.deleteSession(id);
+    });
+
+    test('finalizeOrphanedSessions uses start time when no samples landed', () async {
+      final db = LocalDb.instance;
+      final id = 'test-empty-orphan-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'Empty',
+        startTimeMs: 1000,
+        dataTypes: 'hr',
+      ));
+
+      await db.finalizeOrphanedSessions(nowMs: 99000);
+      final session = await db.getSession(id);
+      expect(session!.endTimeMs, 1000);
+      expect(session.sampleCount, 0);
+
+      await db.deleteSession(id);
+    });
+
+    test('finalizeOrphanedSessions leaves already-closed sessions alone', () async {
+      final db = LocalDb.instance;
+      final id = 'test-closed-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id,
+        deviceId: 'sensor1',
+        name: 'Closed',
+        startTimeMs: 1000,
+        endTimeMs: 4000,
+        dataTypes: 'hr',
+        sampleCount: 1,
+      ));
+      await db.insertSamples(id, [SensorSample(timestampMs: 2000, hr: 64)]);
+
+      expect(await db.finalizeOrphanedSessions(nowMs: 99000), 0);
+      expect((await db.getSession(id))!.endTimeMs, 4000);
+
+      await db.deleteSession(id);
     });
 
     test('deleteSession cascades to samples', () async {

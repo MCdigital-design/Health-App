@@ -134,13 +134,13 @@ class AccessLinkService {
     );
 
     if (response.statusCode != 200) {
-      throw Exception('Token exchange failed (${response.statusCode}): ${response.body}');
+      throw Exception('Token exchange failed (${response.statusCode})');
     }
 
     final json = jsonDecode(response.body) as Map<String, dynamic>;
     final accessToken = json['access_token'] as String?;
     if (accessToken == null) {
-      throw Exception('Token response did not include an access_token: ${response.body}');
+      throw Exception('Token response did not include an access_token');
     }
     final userId = json['x_user_id']?.toString();
 
@@ -171,7 +171,7 @@ class AccessLinkService {
 
     // 200 = registered now, 409 = already registered previously — both fine.
     if (response.statusCode != 200 && response.statusCode != 409) {
-      throw Exception('User registration failed (${response.statusCode}): ${response.body}');
+      throw Exception('User registration failed (${response.statusCode})');
     }
   }
 
@@ -200,7 +200,7 @@ class AccessLinkService {
       throw Exception('Polar Flow session expired. Reconnect in Settings.');
     }
     if (response.statusCode != 200) {
-      throw Exception('Failed to list exercises (${response.statusCode}): ${response.body}');
+      throw Exception('Failed to list exercises (${response.statusCode})');
     }
 
     final decoded = jsonDecode(response.body);
