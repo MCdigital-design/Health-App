@@ -4,7 +4,7 @@ import 'package:verity_dashboard/ai/openai_chat_service.dart';
 void main() {
   test('Codex body matches the ChatGPT backend allowlist', () {
     final body = buildCodexChatBody(
-      model: 'gpt-5.4',
+      model: 'gpt-5.6-terra',
       instructions: 'You are Verity Coach.\n\nSession brief: HR 1540 PPG 0',
       history: const [
         ChatTurn(role: 'user', text: 'hi'),

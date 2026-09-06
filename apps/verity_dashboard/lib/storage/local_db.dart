@@ -29,7 +29,7 @@ class LocalDb {
   /// app's private SQLite database, which survives app restarts and
   /// in-place APK updates (it is only lost if the app is uninstalled or the
   /// user clears app storage from Android settings).
-  static const int _schemaVersion = 2;
+  static const int _schemaVersion = 3;
 
   LocalDb._internal();
 
@@ -78,6 +78,7 @@ class LocalDb {
         ''');
         await db.execute('CREATE INDEX idx_samples_session ON samples(session_id)');
         await db.execute('CREATE INDEX idx_samples_session_time ON samples(session_id, timestamp_ms)');
+        await _createAiDashboards(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
@@ -87,6 +88,9 @@ class LocalDb {
           await db.execute(
             'CREATE INDEX IF NOT EXISTS idx_samples_session_time ON samples(session_id, timestamp_ms)',
           );
+        }
+        if (oldVersion < 3) {
+          await _createAiDashboards(db);
         }
       },
     );
@@ -320,5 +324,17 @@ class LocalDb {
       for (final r in rows)
         (r['session_id'] as String): (r['bytes'] as int? ?? 0),
     };
+  }
+
+  static Future<void> _createAiDashboards(Database db) {
+    return db.execute('''
+      CREATE TABLE IF NOT EXISTS ai_dashboards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        spec_json TEXT NOT NULL,
+        created_ms INTEGER NOT NULL,
+        account_hint TEXT
+      )
+    ''');
   }
 }

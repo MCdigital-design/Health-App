@@ -35,6 +35,44 @@ void main() {
     expect(text, contains('HR 20'));
     expect(text, contains('PPG 0'));
     expect(text, contains('no PPG'));
+    expect(text, contains('id=$id'));
+    await db.deleteSession(id);
+  });
+
+  test('standard brief includes HR points; compact stays thinner', () async {
+    final db = LocalDb.instance;
+    await db.deleteAllSessions();
+    final id = 'brief-depth-${const Uuid().v4()}';
+    await db.insertSession(RecordingSession(
+      id: id,
+      deviceId: '1F68643B',
+      name: 'PPG take',
+      startTimeMs: DateTime(2026, 9, 5, 10).millisecondsSinceEpoch,
+      endTimeMs: DateTime(2026, 9, 5, 10, 16).millisecondsSinceEpoch,
+      dataTypes: 'hr,ppg',
+    ));
+    await db.insertSamples(id, [
+      for (var i = 0; i < 30; i++)
+        SensorSample(timestampMs: 1000 + i * 1000, hr: 90 + i),
+      for (var i = 0; i < 200; i++)
+        SensorSample(timestampMs: 1000 + i * 50, ppg: [300000 + i, 300100 + i]),
+    ]);
+
+    final compact = await SessionBrief.build(
+      focusSessionId: id,
+      depth: ContextDepth.compact,
+    );
+    final standard = await SessionBrief.build(
+      focusSessionId: id,
+      depth: ContextDepth.standard,
+    );
+
+    expect(compact, contains('HR trace (downsampled, bpm)'));
+    expect(compact, isNot(contains('PPG envelope')));
+    expect(standard, contains('PPG envelope'));
+    expect(standard, contains('min/max envelope'));
+    expect(standard, contains('of 200 pts'));
+    expect(standard.length, greaterThan(compact.length));
     await db.deleteSession(id);
   });
 }

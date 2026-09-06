@@ -137,7 +137,10 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
                 : () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => AiScreen(focusSession: session),
+                        builder: (_) => AiScreen(
+                          focusSession: session,
+                          initialWorkspace: AiWorkspace.chat,
+                        ),
                       ),
                     );
                   },

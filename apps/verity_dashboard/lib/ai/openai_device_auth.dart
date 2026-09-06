@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'ai_prefs.dart';
+
 /// OpenAI Codex public device-code client (same as Codex CLI).
 /// Tokens stay on this phone. Backup of prefs is already denied.
 const kOpenAiClientId = 'app_EMoamEEZ73f0CkXaXp7hrann';
@@ -92,6 +94,9 @@ class OpenAiDeviceAuth {
     await prefs.remove(_kAccount);
     await prefs.remove(_kEmail);
     await prefs.remove(_kPlan);
+    // Do not keep the previous person's model on a shared phone.
+    await prefs.remove(kAiSelectedModel);
+    await prefs.remove(kAiSelectedModelAccount);
   }
 
   Future<DeviceLoginPending> startDeviceLogin() async {

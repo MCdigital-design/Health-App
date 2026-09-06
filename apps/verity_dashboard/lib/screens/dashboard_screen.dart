@@ -2,11 +2,13 @@ import 'dart:async';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../ai/studio_dashboard_store.dart';
 import '../metrics/hrv.dart';
 import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
 import '../polar/polar_repository.dart';
 import '../storage/local_db.dart';
+import '../widgets/studio_dashboard_view.dart';
 import 'session_detail_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -19,7 +21,9 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   List<RecordingSession> _sessions = [];
   Map<String, List<SensorSample>> _samples = {};
+  List<SavedStudioDashboard> _custom = const [];
   StreamSubscription? _sessionsChangedSub;
+  StreamSubscription? _studioSub;
 
   @override
   void initState() {
@@ -31,11 +35,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _sessionsChangedSub = context.read<PolarRepository>().sessionsChanged.listen((_) {
       _loadData();
     });
+    _studioSub = StudioDashboardStore.changes.listen((_) => _loadData());
   }
 
   @override
   void dispose() {
     _sessionsChangedSub?.cancel();
+    _studioSub?.cancel();
     super.dispose();
   }
 
@@ -49,10 +55,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         limit: 2000,
       );
     }
+    final custom = await StudioDashboardStore().list();
     if (!mounted) return;
     setState(() {
       _sessions = sessions;
       _samples = samples;
+      _custom = custom;
     });
   }
 
@@ -66,6 +74,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           padding: const EdgeInsets.all(16),
           children: [
             _buildSummaryCards(),
+            if (_custom.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text('Custom views', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              ..._custom.map(_buildCustomCard),
+            ],
             const SizedBox(height: 16),
             if (_sessions.isEmpty)
               const Card(
@@ -136,6 +150,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
       ],
+    );
+  }
+
+  Widget _buildCustomCard(SavedStudioDashboard row) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: const Icon(Icons.dashboard_customize),
+        title: Text(row.title),
+        subtitle: const Text('Built in AI Studio'),
+        onTap: () {
+          final spec = row.spec;
+          if (spec == null) return;
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => StudioDashboardPage(title: row.title, spec: spec),
+            ),
+          );
+        },
+      ),
     );
   }
 

@@ -501,7 +501,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 children: [
                   Text('About', style: Theme.of(context).textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  const Text('Verity Dashboard v1.2.6'),
+                  const Text('Verity Dashboard v1.2.7'),
                   const Text('Offline-first Polar Verity Sense client'),
                   const CollapsibleHint(
                     label: 'Not a medical device',
@@ -510,8 +510,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         'Keep the app on-screen while recording; Android may pause '
                         'Bluetooth if the screen is locked. Recordings stay on this '
                         'phone and are not backed up to Google. Optional ChatGPT '
-                        'chat uses your own OpenAI login and only sends a compact '
-                        'summary when you ask a question.',
+                        'uses whoever signs in on this phone and the models that '
+                        'account can use. A session brief (Compact / Standard / Full) '
+                        'is sent only when you ask — not the raw 40k-row PPG table.',
                   ),
                 ],
               ),
