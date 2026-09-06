@@ -1,0 +1,10 @@
+{
+  "name": "Polar Verity Sense",
+  "install": "npm install && (cd apps/verity_dashboard && flutter pub get)",
+  "terminals": [
+    {
+      "name": "next-dev",
+      "command": "npm run dev"
+    }
+  ]
+}
