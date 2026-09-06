@@ -7,7 +7,7 @@ Dedicated home for Polar Verity Sense work, moved out of [alphatrend-mt5-qa#1](h
 Flutter dashboard you sideload on a Samsung phone. Live HR/PPG, recording, history, CSV export, optional Polar Flow import. No Play Store.
 
 - App source: [`apps/verity_dashboard`](apps/verity_dashboard)
-- Sideload APK: [`dist/verity-dashboard.apk`](dist/verity-dashboard.apk) (29 MB, SHA256 `af7cb9fea9ef9bcaff5c67c746d923f50bd0fc1f2e65c85ccb127843201bbcc6`)
+- Sideload APK: [`dist/verity-dashboard.apk`](dist/verity-dashboard.apk) (30 MB, SHA256 `223f248eb9dbba1d768c302b35e06313d22726245feb2424c21444af53c74103`)
 - Install notes: [`dist/INSTALL.txt`](dist/INSTALL.txt)
 - QA audit: [`apps/verity_dashboard/QA_AUDIT.md`](apps/verity_dashboard/QA_AUDIT.md)
 

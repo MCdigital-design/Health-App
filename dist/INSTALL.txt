@@ -12,9 +12,21 @@ installed a version, just install this one on top - no need to uninstall.
 4. If Play Protect warns: More details -> Install anyway.
 
 Requires Android 8.0 or newer. Release-signed (not debug/testOnly).
-SHA256: af7cb9fea9ef9bcaff5c67c746d923f50bd0fc1f2e65c85ccb127843201bbcc6
+SHA256: 223f248eb9dbba1d768c302b35e06313d22726245feb2424c21444af53c74103
 
-WHAT'S NEW IN THIS BUILD (v1.2.6 — ChatGPT chat after device login):
+WHAT'S NEW IN THIS BUILD (v1.2.7 — adaptive models, any account, Studio):
+
+- Model list comes from whoever signs in, not a hardcoded gpt-5.4 / 5.5.
+  Pick one. Default to a model that account can use.
+- Switch account / sign out. The next person uses their ChatGPT login
+  and their models.
+- Context depth: Compact / Standard / Full. Standard is the default.
+  That is not 40,000 raw PPG rows — those envelopes keep the shape
+  without flooding the model (40k PPG rows is ~1.7 MB, not 40 KB).
+- AI tab opens Chat or Studio. Studio (and Chat “make a dashboard”)
+  can save custom views on the phone; they also show on Dashboard.
+
+WHAT'S NEW IN THE PREVIOUS BUILD (v1.2.6 — ChatGPT chat after device login):
 
 - Device verify already worked. Chat was HTTP 400 because the request
   used a system message, extra fields, and gpt-4o. It now matches the
