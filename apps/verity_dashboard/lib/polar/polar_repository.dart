@@ -868,11 +868,12 @@ class PolarRepository {
     );
     _sessionsChangedController.add(null);
 
-    // Stream availability and optional sensors are not prerequisites to
-    // writing the session row. A failing stream is reported separately.
-    unawaited(startAllAvailableStreams(silent: true).catchError((Object e) {
-      _statusController.add('Could not start an optional sensor stream: $e');
-    }));
+    // BLE streams already start when the Polar SDK reports connection.
+    // The Record button must NOT request all native measurements again:
+    // doing so races pending feature readiness/stream starts and can cause
+    // duplicate PMD commands (ALREADY_IN_STATE / INVALID_STATE).
+    // Recording only switches on local SQLite capture. Dedicated PPI is
+    // the sole opt-in recording-only stream, disabled by default.
     if (_recordPpi && !_sdkModeEnabled) {
       unawaited(startPpiStreaming(silent: true));
     }
