@@ -118,7 +118,10 @@ class PolarRepository {
   bool _recordAccel = true;
   bool _recordGyro = true;
   bool _recordMag = true;
-  bool _recordPpi = true;
+  // Optional on Verity Sense: PPI switches HR to slower ~5s updates and
+  // takes ~25s for the first PPI data. Keep normal HR+PPG reliable by
+  // default; existing explicitly saved user settings remain respected.
+  bool _recordPpi = false;
   bool get recordAccel => _recordAccel;
   bool get recordGyro => _recordGyro;
   bool get recordMag => _recordMag;
@@ -214,7 +217,7 @@ class PolarRepository {
     _recordAccel = prefs.getBool(_prefRecordAccel) ?? true;
     _recordGyro = prefs.getBool(_prefRecordGyro) ?? true;
     _recordMag = prefs.getBool(_prefRecordMag) ?? true;
-    _recordPpi = prefs.getBool(_prefRecordPpi) ?? true;
+    _recordPpi = prefs.getBool(_prefRecordPpi) ?? false;
   }
 
   Future<void> setRecordAccel(bool value) async {
@@ -898,7 +901,11 @@ class PolarRepository {
         endTimeMs: DateTime.now().millisecondsSinceEpoch,
       );
       _currentSessionId = null;
-      await stopPpiStreaming();
+      try {
+        await stopPpiStreaming();
+      } catch (e) {
+        _statusController.add('Recording saved; optional PPI stop reported: $e');
+      }
       _sessionsChangedController.add(null);
     } catch (_) {
       // Never claim "Saved" after a failed disk write. Keep the session
