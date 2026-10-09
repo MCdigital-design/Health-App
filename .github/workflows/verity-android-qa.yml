@@ -52,6 +52,13 @@ jobs:
           name: verity-emulator-debug-apk
           path: apps/verity_dashboard/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
+      - name: Build signed ARM release candidate for on-phone QA
+        run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verity-android-arm-test-candidate
+          path: apps/verity_dashboard/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
 
   independent-qa:
     name: QA / clean Android emulator install and visual smoke
