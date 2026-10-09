@@ -164,6 +164,39 @@ class LocalDb {
     return maps.map((m) => SensorSample.fromMap(m)).toList();
   }
 
+  /// HRV only needs heart-rate/interval rows. Loading every 55Hz PPG and
+  /// motion row into the session detail screen duplicates hundreds of
+  /// thousands of samples and can exhaust phone memory.
+  Future<List<SensorSample>> getHrvSamples(String sessionId) async {
+    final db = await database;
+    final rows = await db.query(
+      'samples',
+      where: 'session_id = ? AND (hr IS NOT NULL OR ppi IS NOT NULL)',
+      whereArgs: [sessionId],
+      orderBy: 'timestamp_ms ASC',
+    );
+    return rows.map((row) => SensorSample.fromMap(row)).toList();
+  }
+
+  /// Cursor-based paging for a full-fidelity CSV export without loading
+  /// the entire recording into memory. The row ID is indexed and unique.
+  /// Export order follows ingestion/commit order; timestamps remain intact.
+  Future<List<Map<String, Object?>>> getSampleRowsAfterId(
+    String sessionId,
+    int afterId, {
+    int limit = 500,
+  }) async {
+    if (limit <= 0 || limit > 5000) throw ArgumentError.value(limit, 'limit');
+    final db = await database;
+    return db.query(
+      'samples',
+      where: 'session_id = ? AND id > ?',
+      whereArgs: [sessionId, afterId],
+      orderBy: 'id ASC',
+      limit: limit,
+    );
+  }
+
   /// Chart-ready elapsed-second series for one signal. Queries only that
   /// column so a 40k-row PPG dump cannot hide 1 Hz HR.
   Future<List<TimeValue>> getChartSeries({
