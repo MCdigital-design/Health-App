@@ -20,7 +20,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _recordAccel = true;
   bool _recordGyro = true;
   bool _recordMag = true;
-  bool _recordPpi = true;
+  bool _recordPpi = false;
   bool _scanning = false;
   StreamSubscription? _deviceSub;
   StreamSubscription? _connSub;
