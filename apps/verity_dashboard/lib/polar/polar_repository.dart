@@ -118,7 +118,10 @@ class PolarRepository {
   bool _recordAccel = true;
   bool _recordGyro = true;
   bool _recordMag = true;
-  bool _recordPpi = true;
+  // Optional on Verity Sense: PPI switches HR to slower ~5s updates and
+  // takes ~25s for the first PPI data. Keep normal HR+PPG reliable by
+  // default; existing explicitly saved user settings remain respected.
+  bool _recordPpi = false;
   bool get recordAccel => _recordAccel;
   bool get recordGyro => _recordGyro;
   bool get recordMag => _recordMag;
@@ -146,7 +149,10 @@ class PolarRepository {
   String? _currentSessionId;
   final List<SensorSample> _sessionBuffer = [];
   Timer? _flushTimer;
-  Future<void> _flushLock = Future.value();
+  Future<void>? _flushInFlight;
+  bool _stoppingSession = false;
+  bool _lastFlushFailed = false;
+  int _lastFlushFailureMs = 0;
 
   PolarRepository() {
     _loadPrefs();
@@ -212,7 +218,7 @@ class PolarRepository {
     _recordAccel = prefs.getBool(_prefRecordAccel) ?? true;
     _recordGyro = prefs.getBool(_prefRecordGyro) ?? true;
     _recordMag = prefs.getBool(_prefRecordMag) ?? true;
-    _recordPpi = prefs.getBool(_prefRecordPpi) ?? true;
+    _recordPpi = prefs.getBool(_prefRecordPpi) ?? false;
   }
 
   Future<void> setRecordAccel(bool value) async {
@@ -827,76 +833,143 @@ class PolarRepository {
     _ppiStreaming = false;
   }
 
+  /// A recording is only reported as started once its SQLite session row
+  /// exists. Starting extra BLE streams is best-effort and must not make a
+  /// successfully persisted recording look like a failed start.
   Future<String> startLocalSession(String name, [String? dataTypes]) async {
-    await startAllAvailableStreams(silent: true);
-    if (_recordPpi && !_sdkModeEnabled) {
-      unawaited(startPpiStreaming(silent: true));
+    if (_currentSessionId != null || _stoppingSession) {
+      throw StateError('A recording is already active.');
+    }
+    final deviceId = _connectedDeviceId;
+    if (deviceId == null) {
+      throw StateError('Connect to the Polar sensor before recording.');
     }
     final sessionId = _uuid.v4();
     final session = RecordingSession(
       id: sessionId,
-      deviceId: _connectedDeviceId ?? 'unknown',
+      deviceId: deviceId,
       name: name,
       startTimeMs: DateTime.now().millisecondsSinceEpoch,
       dataTypes: dataTypes ?? activeRecordingTypes,
       source: SessionSource.liveApp,
     );
+
+    // Do this first: a storage error must be surfaced before we turn on
+    // high-rate capture and tell the user recording is active.
     await _db.insertSession(session);
-    _currentSessionId = sessionId;
     _sessionBuffer.clear();
-    _flushTimer = Timer.periodic(const Duration(seconds: 2), (_) => _flushSessionBuffer());
+    _lastFlushFailed = false;
+    _lastFlushFailureMs = 0;
+    _currentSessionId = sessionId;
+    _flushTimer?.cancel();
+    _flushTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(_flushSessionBuffer()),
+    );
     _sessionsChangedController.add(null);
+
+    // BLE streams already start when the Polar SDK reports connection.
+    // The Record button must NOT request all native measurements again:
+    // doing so races pending feature readiness/stream starts and can cause
+    // duplicate PMD commands (ALREADY_IN_STATE / INVALID_STATE).
+    // Recording only switches on local SQLite capture. Dedicated PPI is
+    // the sole opt-in recording-only stream, disabled by default.
+    if (_recordPpi && !_sdkModeEnabled) {
+      unawaited(startPpiStreaming(silent: true));
+    }
     return sessionId;
   }
 
   Future<void> stopLocalSession() async {
+    final sessionId = _currentSessionId;
+    if (sessionId == null || _stoppingSession) return;
+    _stoppingSession = true;
     _flushTimer?.cancel();
-    await _flushSessionBuffer();
-    // Dedicated PPI stream slows live HR to ~5s. Stop it after the take
-    // so watching Live stays at ~1 Hz; RR intervals on HR packets remain.
-    if (_currentSessionId != null) {
-      final count = await _db.getSampleCount(_currentSessionId!);
+    _flushTimer = null;
+    try {
+      // Stop accepting new samples at the user's stop request. Drain
+      // *all* outstanding writes, including samples accumulated while a
+      // previous batch was in flight, BEFORE marking the row completed.
+      while (_flushInFlight != null || _sessionBuffer.isNotEmpty) {
+        await _flushSessionBuffer();
+        if (_lastFlushFailed) {
+          throw StateError('Phone storage write failed. Your pending samples '
+              'are still in memory; keep the app open and retry Stop.');
+        }
+      }
+      final count = await _db.getSampleCount(sessionId);
       await _db.updateSessionSampleCount(
-        _currentSessionId!,
+        sessionId,
         count,
         endTimeMs: DateTime.now().millisecondsSinceEpoch,
       );
+      _currentSessionId = null;
+      try {
+        await stopPpiStreaming();
+      } catch (e) {
+        _statusController.add('Recording saved; optional PPI stop reported: $e');
+      }
+      _sessionsChangedController.add(null);
+    } catch (_) {
+      // Never claim "Saved" after a failed disk write. Keep the session
+      // active, retain buffered samples and resume periodic retries.
+      _flushTimer ??= Timer.periodic(
+        const Duration(seconds: 2),
+        (_) => unawaited(_flushSessionBuffer()),
+      );
+      rethrow;
+    } finally {
+      _stoppingSession = false;
     }
-    _currentSessionId = null;
-    await stopPpiStreaming();
-    _sessionsChangedController.add(null);
   }
 
   bool get isRecordingLocalSession => _currentSessionId != null;
 
   void _addToSession(SensorSample sample) {
-    if (_currentSessionId == null) return;
+    if (_currentSessionId == null || _stoppingSession) return;
     _sessionBuffer.add(sample);
-    if (_sessionBuffer.length >= 100) {
+    // The old code queued a Future for EVERY incoming sample after the
+    // 100-row threshold until SQLite completed, which could snowball at
+    // hundreds of samples/second. Coalesce to one write at a time.
+    if (_sessionBuffer.length >= 100 &&
+        _flushInFlight == null &&
+        DateTime.now().millisecondsSinceEpoch - _lastFlushFailureMs >= 2000) {
       unawaited(_flushSessionBuffer());
     }
   }
 
   Future<void> _flushSessionBuffer() {
-    final previous = _flushLock;
-    final gate = Completer<void>();
-    _flushLock = gate.future;
-    return previous.then((_) => _flushSessionBufferUnlocked()).whenComplete(gate.complete);
+    final active = _flushInFlight;
+    if (active != null) return active;
+    if (_currentSessionId == null || _sessionBuffer.isEmpty) {
+      return Future<void>.value();
+    }
+    final task = _flushSessionBufferUnlocked();
+    final tracked = task.whenComplete(() {
+      _flushInFlight = null;
+    });
+    _flushInFlight = tracked;
+    return tracked;
   }
 
   Future<void> _flushSessionBufferUnlocked() async {
-    if (_currentSessionId == null || _sessionBuffer.isEmpty) return;
-    final sessionId = _currentSessionId!;
-    final samples = List<SensorSample>.from(_sessionBuffer);
-    _sessionBuffer.clear();
+    final sessionId = _currentSessionId;
+    if (sessionId == null || _sessionBuffer.isEmpty) return;
+    // Bound each transaction to avoid a huge blocking SQLite batch after
+    // a temporary stall, with the remainder retained for the next pass.
+    final samples = _sessionBuffer.take(500).toList();
+    _sessionBuffer.removeRange(0, samples.length);
     try {
       await _db.insertSamples(sessionId, samples);
+      _lastFlushFailed = false;
+      _lastFlushFailureMs = 0;
     } catch (e) {
-      if (_currentSessionId == sessionId) {
-        _sessionBuffer.insertAll(0, samples);
-      }
+      // Restore in original order; no silent loss or false Saved banner.
+      _sessionBuffer.insertAll(0, samples);
+      _lastFlushFailed = true;
+      _lastFlushFailureMs = DateTime.now().millisecondsSinceEpoch;
       if (!_statusController.isClosed) {
-        _statusController.add('Could not save samples to the phone. Will retry.');
+        _statusController.add('Could not save recording samples to phone storage: $e');
       }
     }
   }

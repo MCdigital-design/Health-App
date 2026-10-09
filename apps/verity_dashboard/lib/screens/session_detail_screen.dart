@@ -21,7 +21,6 @@ class SessionDetailScreen extends StatefulWidget {
 }
 
 class _SessionDetailScreenState extends State<SessionDetailScreen> {
-  List<SensorSample> _samples = [];
   List<TimeValue> _hr = const [];
   List<TimeValue> _ppg = const [];
   List<TimeValue> _ppi = const [];
@@ -44,7 +43,7 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
     final db = LocalDb.instance;
     final session = widget.session;
     final results = await Future.wait([
-      db.getSamples(session.id),
+      db.getHrvSamples(session.id),
       db.getSampleTypeCounts(session.id),
       db.estimateSessionBytes(session.id),
       db.getChartSeries(sessionId: session.id, signal: ChartSignal.hr, sessionStartMs: session.startTimeMs),
@@ -57,7 +56,6 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
     if (!mounted) return;
     final samples = results[0] as List<SensorSample>;
     setState(() {
-      _samples = samples;
       _counts = results[1] as SessionSampleCounts;
       _estimatedBytes = results[2] as int;
       _hr = results[3] as List<TimeValue>;
@@ -72,29 +70,59 @@ class _SessionDetailScreenState extends State<SessionDetailScreen> {
   }
 
   Future<void> _export() async {
-    final buffer = StringBuffer();
-    buffer.writeln('timestamp_ms,timestamp_iso,hr,ppi,ppg,acc,gyro,mag');
-    for (final s in _samples) {
-      final iso = DateTime.fromMillisecondsSinceEpoch(s.timestampMs).toIso8601String();
-      buffer.writeln(
-        '${s.timestampMs},$iso,${s.hr ?? ''},'
-        '"${s.ppi?.join(';') ?? ''}","${s.ppg?.join(';') ?? ''}",'
-        '"${s.acc?.join(';') ?? ''}","${s.gyro?.join(';') ?? ''}","${s.mag?.join(';') ?? ''}"',
-      );
-    }
+    File? file;
+    IOSink? sink;
     try {
-      final dir = await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory();
+      final dir = await getExternalStorageDirectory() ??
+          await getApplicationDocumentsDirectory();
       final safeName = widget.session.id.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
-      final file = File('${dir.path}/verity_$safeName.csv');
-      await file.writeAsString(buffer.toString());
-      setState(() => _exportedPath = file.path);
+      file = File('${dir.path}/verity_$safeName.csv');
+      sink = file.openWrite();
+      sink.writeln('timestamp_ms,timestamp_iso,hr,ppi,ppg,acc,gyro,mag');
+
+      // Stream every source row to disk in 500-row pages. Previously the
+      // detail view held all samples AND a giant CSV StringBuffer in RAM,
+      // which could OOM on a long high-rate recording.
+      var afterId = 0;
+      while (true) {
+        final rows = await LocalDb.instance.getSampleRowsAfterId(
+          widget.session.id,
+          afterId,
+        );
+        if (rows.isEmpty) break;
+        for (final row in rows) {
+          afterId = row['id'] as int;
+          final sample = SensorSample.fromMap(row);
+          final iso = DateTime.fromMillisecondsSinceEpoch(sample.timestampMs)
+              .toIso8601String();
+          sink.writeln(
+            '${sample.timestampMs},$iso,${sample.hr ?? ''},'
+            '"${sample.ppi?.join(';') ?? ''}","${sample.ppg?.join(';') ?? ''}",'
+            '"${sample.acc?.join(';') ?? ''}","${sample.gyro?.join(';') ?? ''}",'
+            '"${sample.mag?.join(';') ?? ''}"',
+          );
+        }
+        await sink.flush();
+      }
+      await sink.close();
+      sink = null;
       if (!mounted) return;
+      setState(() => _exportedPath = file!.path);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Exported to ${file.path}'), duration: const Duration(seconds: 6)),
+        SnackBar(
+          content: Text('Exported to ${file.path}'),
+          duration: const Duration(seconds: 6),
+        ),
       );
     } catch (e) {
+      try {
+        await sink?.close();
+        if (file != null && await file.exists()) await file.delete();
+      } catch (_) {}
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Export failed: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed; no incomplete file kept: $e')),
+      );
     }
   }
 
