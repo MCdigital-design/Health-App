@@ -152,6 +152,7 @@ class PolarRepository {
   Future<void>? _flushInFlight;
   bool _stoppingSession = false;
   bool _lastFlushFailed = false;
+  int _lastFlushFailureMs = 0;
 
   PolarRepository() {
     _loadPrefs();
@@ -858,6 +859,7 @@ class PolarRepository {
     await _db.insertSession(session);
     _sessionBuffer.clear();
     _lastFlushFailed = false;
+    _lastFlushFailureMs = 0;
     _currentSessionId = sessionId;
     _flushTimer?.cancel();
     _flushTimer = Timer.periodic(
@@ -928,7 +930,9 @@ class PolarRepository {
     // The old code queued a Future for EVERY incoming sample after the
     // 100-row threshold until SQLite completed, which could snowball at
     // hundreds of samples/second. Coalesce to one write at a time.
-    if (_sessionBuffer.length >= 100 && _flushInFlight == null) {
+    if (_sessionBuffer.length >= 100 &&
+        _flushInFlight == null &&
+        DateTime.now().millisecondsSinceEpoch - _lastFlushFailureMs >= 2000) {
       unawaited(_flushSessionBuffer());
     }
   }
@@ -957,10 +961,12 @@ class PolarRepository {
     try {
       await _db.insertSamples(sessionId, samples);
       _lastFlushFailed = false;
+      _lastFlushFailureMs = 0;
     } catch (e) {
       // Restore in original order; no silent loss or false Saved banner.
       _sessionBuffer.insertAll(0, samples);
       _lastFlushFailed = true;
+      _lastFlushFailureMs = DateTime.now().millisecondsSinceEpoch;
       if (!_statusController.isClosed) {
         _statusController.add('Could not save recording samples to phone storage: $e');
       }
