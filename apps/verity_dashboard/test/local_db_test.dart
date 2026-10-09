@@ -184,6 +184,52 @@ void main() {
       await db.deleteSession(id);
     });
 
+    test('HRV query avoids loading PPG/motion rows and preserves intervals', () async {
+      final db = LocalDb.instance;
+      final id = 'test-hrv-query-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id, deviceId: 'sensor', name: 'HRV', startTimeMs: 1000,
+        dataTypes: 'hr,ppg,ppi',
+      ));
+      await db.insertSamples(id, [
+        SensorSample(timestampMs: 1000, hr: 70, ppi: [850]),
+        SensorSample(timestampMs: 1001, ppg: [1234]),
+        SensorSample(timestampMs: 1002, acc: [1.0, 2.0, 3.0]),
+        SensorSample(timestampMs: 1003, ppi: [870]),
+        SensorSample(timestampMs: 1004, hr: 75),
+      ]);
+      final data = await db.getHrvSamples(id);
+      expect(data.length, 3);
+      expect(data.where((s) => s.ppi != null).length, 2);
+      await db.deleteSession(id);
+    });
+
+    test('cursor pagination returns every raw row once in bounded pages', () async {
+      final db = LocalDb.instance;
+      final id = 'test-export-pages-${_uuid.v4()}';
+      await db.insertSession(RecordingSession(
+        id: id, deviceId: 'sensor', name: 'Export', startTimeMs: 1000,
+        dataTypes: 'hr,ppg',
+      ));
+      await db.insertSamples(id, [
+        for (var i = 0; i < 1011; i++)
+          SensorSample(timestampMs: 1000 + i, ppg: [i]),
+      ]);
+      var cursor = 0;
+      var total = 0;
+      final allIds = <int>[];
+      while (true) {
+        final rows = await db.getSampleRowsAfterId(id, cursor, limit: 137);
+        if (rows.isEmpty) break;
+        allIds.addAll(rows.map((r) => r['id'] as int));
+        cursor = rows.last['id'] as int;
+        total += rows.length;
+      }
+      expect(total, 1011);
+      expect(allIds.toSet().length, 1011);
+      await db.deleteSession(id);
+    });
+
     test('deleteAllSessions clears every session and sample', () async {
       final db = LocalDb.instance;
       final id = 'test-all-${_uuid.v4()}';
