@@ -28,7 +28,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
-      - uses: android-actions/setup-android@v3
+      # GitHub Ubuntu runners already provide Android cmdline-tools and SDK.
+      # setup-android@v3 requests the retired 'tools' package and fails here.
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.35.7'
