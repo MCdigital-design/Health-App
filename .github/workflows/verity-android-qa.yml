@@ -1,0 +1,87 @@
+name: Verity Android build and independent QA
+
+on:
+  push:
+    branches:
+      - fix/recording-crash-durability-20261009
+  pull_request:
+    branches:
+      - cursor/session-data-charts-imu-b838
+    paths:
+      - 'apps/verity_dashboard/**'
+      - '.github/workflows/verity-android-qa.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  developer-build:
+    name: Developer / static checks + tests + APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: apps/verity_dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.35.7'
+          channel: stable
+          cache: true
+      - name: Dependencies
+        run: flutter pub get
+      - name: Flutter static analysis
+        run: flutter analyze
+      - name: Flutter unit + widget regression tests
+        run: flutter test --concurrency=1 --timeout 60s
+      - name: Build emulator-specific debug APK
+        env:
+          ORG_GRADLE_PROJECT_ciEmulator: 'true'
+        run: flutter build apk --debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verity-emulator-debug-apk
+          path: apps/verity_dashboard/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+
+  independent-qa:
+    name: QA / clean Android emulator install and visual smoke
+    needs: developer-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: verity-emulator-debug-apk
+          path: qa-apk
+      - name: Headless emulator smoke + screenshot
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            mkdir -p qa-evidence
+            adb install -r qa-apk/app-debug.apk
+            adb shell am start -n com.example.verity_dashboard/.MainActivity
+            sleep 12
+            adb shell pidof com.example.verity_dashboard
+            adb exec-out screencap -p > qa-evidence/app-launch.png
+            adb shell uiautomator dump /sdcard/window.xml || true
+            adb pull /sdcard/window.xml qa-evidence/window.xml || true
+            adb logcat -d -t 2500 > qa-evidence/logcat.txt
+      - name: Upload independent QA artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verity-qa-screenshots-and-logs
+          path: qa-evidence/
+          if-no-files-found: warn
