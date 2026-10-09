@@ -20,6 +20,7 @@ extension ChartSignalColumn on ChartSignal {
 class LocalDb {
   static final LocalDb instance = LocalDb._internal();
   static Database? _db;
+  static Future<Database>? _openingDb;
 
   /// Override in tests so parallel test isolates do not lock one file.
   static String databaseFileName = 'verity_dashboard.db';
@@ -33,10 +34,18 @@ class LocalDb {
 
   LocalDb._internal();
 
-  Future<Database> get database async {
-    if (_db != null) return _db!;
-    _db = await _initDb();
-    return _db!;
+  /// Share the same in-flight open/migration between concurrently mounted
+  /// dashboard and recording screens. A synchronous _db null check alone
+  /// starts duplicate openDatabase calls before the first one completes.
+  Future<Database> get database {
+    if (_db != null) return Future<Database>.value(_db!);
+    return _openingDb ??= _initDb().then((db) {
+      _db = db;
+      return db;
+    }).catchError((Object error) {
+      _openingDb = null;
+      throw error;
+    });
   }
 
   Future<Database> _initDb() async {
