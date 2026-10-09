@@ -1,15 +1,17 @@
 name: Verity Android build and independent QA
 
 on:
-  push:
-    branches:
-      - fix/recording-crash-durability-20261009
+  workflow_dispatch:
   pull_request:
     branches:
       - cursor/session-data-charts-imu-b838
     paths:
       - 'apps/verity_dashboard/**'
       - '.github/workflows/verity-android-qa.yml'
+
+concurrency:
+  group: verity-health-app-qa
+  cancel-in-progress: true
 
 permissions:
   contents: read
