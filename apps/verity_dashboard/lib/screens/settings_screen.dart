@@ -267,8 +267,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: const Text('Replace the app database?'),
         content: Text(
           'Restore the latest completed encrypted backup from the selected folder. '
-          'This REPLACES ' + existing.length.toString() +
-          ' current session(s) in the app. Continue?',
+          'This REPLACES ${existing.length} current session(s) in the app. Continue?',
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
