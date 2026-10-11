@@ -6,6 +6,7 @@ import '../models/recording_session.dart';
 import '../models/sensor_sample.dart';
 import '../models/time_series_buffer.dart';
 import '../storage/local_db.dart';
+import '../storage/local_backup_service.dart';
 import 'polar_errors.dart';
 
 /// Thrown when a Polar SDK feature does not become ready in time, e.g.
@@ -71,6 +72,18 @@ class PolarRepository {
   /// deleted) so any screen showing session lists/history can refresh
   /// without relying on being freshly mounted.
   Stream<void> get sessionsChanged => _sessionsChangedController.stream;
+
+  void notifySessionsChanged() => _sessionsChangedController.add(null);
+
+  Future<void> _backupCompletedData() async {
+    try {
+      if (await LocalBackupService.instance.backupIfConfigured()) {
+        _statusController.add('Encrypted local backup updated.');
+      }
+    } catch (error) {
+      _errorController.add('Recording saved on phone, but backup FAILED: $error');
+    }
+  }
 
   /// Live rolling buffers, keyed by real timestamps (not sample-count
   /// indices), shared by any screen that wants to chart them. See
@@ -910,6 +923,7 @@ class PolarRepository {
         _statusController.add('Recording saved; optional PPI stop reported: $e');
       }
       _sessionsChangedController.add(null);
+      await _backupCompletedData();
     } catch (_) {
       // Never claim "Saved" after a failed disk write. Keep the session
       // active, retain buffered samples and resume periodic retries.
@@ -977,11 +991,13 @@ class PolarRepository {
   Future<void> deleteSession(String sessionId) async {
     await _db.deleteSession(sessionId);
     _sessionsChangedController.add(null);
+    await _backupCompletedData();
   }
 
   Future<void> deleteAllSessions() async {
     await _db.deleteAllSessions();
     _sessionsChangedController.add(null);
+    await _backupCompletedData();
   }
 
   Future<List<PolarExerciseEntry>> listExercises() async {
@@ -1021,8 +1037,10 @@ class PolarRepository {
     await _db.deleteSession(sessionId);
     await _db.insertSession(session);
     await _db.insertSamples(sessionId, samples);
-    await _polar.removeExercise(_connectedDeviceId!, entry);
+    // Do NOT delete the sole sensor-side original after copying to an
+    // unverified phone database. Let the user manage sensor storage in Polar.
     _sessionsChangedController.add(null);
+    await _backupCompletedData();
     return sessionId;
   }
 
