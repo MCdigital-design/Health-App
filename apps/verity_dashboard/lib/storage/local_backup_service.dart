@@ -30,6 +30,9 @@ class LocalBackupService {
 
   Future<bool> get isConfigured async => await hasFolder && await hasPassword;
 
+  Future<bool> get folderContainsBackups async =>
+      (await channel.invokeMethod<int>('archiveCount') ?? 0) > 0;
+
   Future<String> backupNow() async {
     if (!await isConfigured) {
       throw StateError('Choose a backup folder and recovery password first');
