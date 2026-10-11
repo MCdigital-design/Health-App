@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:uuid/uuid.dart';
@@ -309,6 +310,61 @@ void main() {
       expect((await db.getSession(id))!.endTimeMs, 4000);
 
       await db.deleteSession(id);
+    });
+
+
+    test('snapshot restores mixed sensor data after simulated reinstall', () async {
+      final db = LocalDb.instance;
+      final id = 'test-backup-' + _uuid.v4();
+      final temp = await Directory.systemTemp.createTemp('verity-backup-test-');
+      final snapshotPath = temp.path + '/archive.db';
+      try {
+        await db.insertSession(RecordingSession(
+          id: id, deviceId: 'sensor-A', name: 'Retained', startTimeMs: 1000,
+          dataTypes: 'hr,ppg,acc',
+        ));
+        await db.insertSamples(id, [
+          SensorSample(timestampMs: 1200, hr: 72, ppi: [830]),
+          SensorSample(timestampMs: 1210, ppg: [44, 55, 66]),
+          SensorSample(timestampMs: 1220, acc: [1.0, 2.0, 3.0]),
+        ]);
+        await db.createConsistentSnapshot(snapshotPath);
+        expect(await File(snapshotPath).length(), greaterThan(0));
+        await db.deleteSession(id);
+        expect(await db.getSession(id), isNull);
+        await db.restoreConsistentSnapshot(snapshotPath);
+        expect((await db.getSession(id))!.name, 'Retained');
+        final restored = await db.getSamples(id);
+        expect(restored.length, 3);
+        expect(restored[0].hr, 72);
+        expect(restored[1].ppg, [44, 55, 66]);
+        expect(restored[2].acc, [1.0, 2.0, 3.0]);
+      } finally {
+        await db.deleteSession(id);
+        await temp.delete(recursive: true);
+      }
+    });
+
+    test('invalid restore never replaces existing sessions', () async {
+      final db = LocalDb.instance;
+      final id = 'test-invalid-restore-' + _uuid.v4();
+      final temp = await Directory.systemTemp.createTemp('verity-bad-');
+      try {
+        await db.insertSession(RecordingSession(
+          id: id, deviceId: 'sensor-A', name: 'MustKeep', startTimeMs: 1000,
+          dataTypes: 'hr',
+        ));
+        final broken = File(temp.path + '/broken.db');
+        await broken.writeAsString('not a SQLite backup');
+        await expectLater(
+          db.restoreConsistentSnapshot(broken.path),
+          throwsA(isA<Exception>()),
+        );
+        expect((await db.getSession(id))!.name, 'MustKeep');
+      } finally {
+        await db.deleteSession(id);
+        await temp.delete(recursive: true);
+      }
     });
 
     test('deleteSession cascades to samples', () async {
