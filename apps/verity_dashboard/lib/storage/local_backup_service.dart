@@ -35,7 +35,7 @@ class LocalBackupService {
       throw StateError('Choose a backup folder and recovery password first');
     }
     final temp = await getTemporaryDirectory();
-    final snapshot = File(temp.path + '/verity-snapshot-' + const Uuid().v4() + '.db');
+    final snapshot = File('${temp.path}/verity-snapshot-${const Uuid().v4()}.db');
     try {
       await LocalDb.instance.createConsistentSnapshot(snapshot.path);
       return await channel.invokeMethod<String>(
@@ -61,7 +61,7 @@ class LocalBackupService {
     if (password.isEmpty) throw ArgumentError('Enter recovery password');
     if (!await hasFolder) throw StateError('Select your original backup folder');
     final temp = await getTemporaryDirectory();
-    final snapshot = File(temp.path + '/verity-restore-' + const Uuid().v4() + '.db');
+    final snapshot = File('${temp.path}/verity-restore-${const Uuid().v4()}.db');
     try {
       final name = await channel.invokeMethod<String>('restore', {
         'destinationPath': snapshot.path,
