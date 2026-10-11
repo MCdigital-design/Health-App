@@ -67,6 +67,9 @@ class MainActivity : FlutterActivity() {
                         val value: Any? = when (call.method) {
                             "folderStatus" -> currentFolder()?.toString()
                             "hasSecret" -> loadSecret() != null
+                            "archiveCount" -> childList(
+                                currentFolder() ?: error("Select a phone folder first")
+                            ).size
                             "saveSecret" -> {
                                 val secret = call.argument<String>("password")
                                     ?: error("Recovery password required")
