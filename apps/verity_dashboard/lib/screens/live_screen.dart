@@ -28,6 +28,7 @@ class _LiveScreenState extends State<LiveScreen> {
   bool _sdkModeOn = false;
   bool _hrActive = false;
   bool _recording = false;
+  bool _recordingBusy = false;
   String? _statusMessage;
 
   Timer? _uiRefreshTimer;
@@ -44,11 +45,14 @@ class _LiveScreenState extends State<LiveScreen> {
   void initState() {
     super.initState();
     _repo = context.read<PolarRepository>();
+    _recording = _repo.isRecordingLocalSession;
 
     _connSub = _repo.connectionStateStream.listen((state) {
+      if (!mounted) return;
       setState(() => _connectionState = state);
     });
     _batterySub = _repo.batteryStream.listen((level) {
+      if (!mounted) return;
       setState(() => _battery = level);
     });
     _errorSub = _repo.errorStream.listen((message) {
@@ -63,9 +67,11 @@ class _LiveScreenState extends State<LiveScreen> {
       );
     });
     _sdkModeSub = _repo.sdkModeStream.listen((on) {
+      if (!mounted) return;
       setState(() => _sdkModeOn = on);
     });
     _statusSub = _repo.statusStream.listen((message) {
+      if (!mounted) return;
       setState(() => _statusMessage = message);
       _statusClearTimer?.cancel();
       _statusClearTimer = Timer(const Duration(seconds: 6), () {
@@ -94,24 +100,40 @@ class _LiveScreenState extends State<LiveScreen> {
     setState(() {
       _currentHr = _repo.hrBuffer.lastValue?.round();
       _hrActive = _repo.isHrActive;
+      _recording = _repo.isRecordingLocalSession;
     });
   }
 
   Future<void> _toggleRecording() async {
-    if (_recording) {
-      await _repo.stopLocalSession();
-      setState(() => _recording = false);
+    if (_recordingBusy || !mounted) return;
+    setState(() => _recordingBusy = true);
+    try {
+      final wasRecording = _repo.isRecordingLocalSession;
+      if (wasRecording) {
+        await _repo.stopLocalSession();
+      } else {
+        await _repo.startLocalSession('Live Session');
+      }
       if (!mounted) return;
+      setState(() => _recording = _repo.isRecordingLocalSession);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recording saved. See it under Recordings > On Phone.')),
+        SnackBar(
+          content: Text(wasRecording
+              ? 'Recording saved on this phone. See Recordings.'
+              : 'Recording started. Samples are being saved to this phone.'),
+        ),
       );
-    } else {
-      await _repo.startLocalSession('Live Session');
-      setState(() => _recording = true);
+    } catch (e) {
       if (!mounted) return;
+      setState(() => _recording = _repo.isRecordingLocalSession);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Recording started')),
+        SnackBar(
+          content: Text('Recording failed: $e'),
+          duration: const Duration(seconds: 8),
+        ),
       );
+    } finally {
+      if (mounted) setState(() => _recordingBusy = false);
     }
   }
 
@@ -159,7 +181,10 @@ class _LiveScreenState extends State<LiveScreen> {
         ),
         actions: [
           TextButton.icon(
-            onPressed: connected ? _toggleRecording : null,
+            // Stopping and preserving samples must remain possible after BLE drops.
+            onPressed: _recordingBusy || (!connected && !_recording)
+                ? null
+                : _toggleRecording,
             icon: Icon(
               _recording ? Icons.stop_circle : Icons.fiber_manual_record,
               color: _recording ? Colors.redAccent : Colors.white,

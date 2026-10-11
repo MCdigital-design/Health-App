@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import '../charts/chart_math.dart';
@@ -20,6 +21,7 @@ extension ChartSignalColumn on ChartSignal {
 class LocalDb {
   static final LocalDb instance = LocalDb._internal();
   static Database? _db;
+  static Future<Database>? _openingDb;
 
   /// Override in tests so parallel test isolates do not lock one file.
   static String databaseFileName = 'verity_dashboard.db';
@@ -33,10 +35,18 @@ class LocalDb {
 
   LocalDb._internal();
 
-  Future<Database> get database async {
-    if (_db != null) return _db!;
-    _db = await _initDb();
-    return _db!;
+  /// Share the same in-flight open/migration between concurrently mounted
+  /// dashboard and recording screens. A synchronous _db null check alone
+  /// starts duplicate openDatabase calls before the first one completes.
+  Future<Database> get database {
+    if (_db != null) return Future<Database>.value(_db!);
+    return _openingDb ??= _initDb().then((db) {
+      _db = db;
+      return db;
+    }).catchError((Object error) {
+      _openingDb = null;
+      throw error;
+    });
   }
 
   Future<Database> _initDb() async {
@@ -164,6 +174,39 @@ class LocalDb {
     return maps.map((m) => SensorSample.fromMap(m)).toList();
   }
 
+  /// HRV only needs heart-rate/interval rows. Loading every 55Hz PPG and
+  /// motion row into the session detail screen duplicates hundreds of
+  /// thousands of samples and can exhaust phone memory.
+  Future<List<SensorSample>> getHrvSamples(String sessionId) async {
+    final db = await database;
+    final rows = await db.query(
+      'samples',
+      where: 'session_id = ? AND (hr IS NOT NULL OR ppi IS NOT NULL)',
+      whereArgs: [sessionId],
+      orderBy: 'timestamp_ms ASC',
+    );
+    return rows.map((row) => SensorSample.fromMap(row)).toList();
+  }
+
+  /// Cursor-based paging for a full-fidelity CSV export without loading
+  /// the entire recording into memory. The row ID is indexed and unique.
+  /// Export order follows ingestion/commit order; timestamps remain intact.
+  Future<List<Map<String, Object?>>> getSampleRowsAfterId(
+    String sessionId,
+    int afterId, {
+    int limit = 500,
+  }) async {
+    if (limit <= 0 || limit > 5000) throw ArgumentError.value(limit, 'limit');
+    final db = await database;
+    return db.query(
+      'samples',
+      where: 'session_id = ? AND id > ?',
+      whereArgs: [sessionId, afterId],
+      orderBy: 'id ASC',
+      limit: limit,
+    );
+  }
+
   /// Chart-ready elapsed-second series for one signal. Queries only that
   /// column so a 40k-row PPG dump cannot hide 1 Hz HR.
   Future<List<TimeValue>> getChartSeries({
@@ -205,6 +248,95 @@ class LocalDb {
       [sessionId],
     );
     return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+
+  /// SQLite VACUUM INTO creates a consistent snapshot including committed
+  /// rows in WAL, while keeping the primary database readable and writable.
+  /// The output is an app-private temporary file, never the final backup.
+  Future<void> createConsistentSnapshot(String path) async {
+    final output = File(path);
+    if (await output.exists()) await output.delete();
+    final db = await database;
+    final escaped = path.replaceAll("'", "''");
+    try {
+      await db.execute("VACUUM INTO '$escaped'");
+    } catch (_) {
+      if (await output.exists()) await output.delete();
+      rethrow;
+    }
+    if (!await output.exists() || await output.length() == 0) {
+      throw StateError('SQLite did not produce a usable snapshot');
+    }
+  }
+
+  /// Validate the ENTIRE SQLite archive before replacing any existing data.
+  /// Stage beside the database for same-filesystem atomic rename; retain the
+  /// previous database until the replacement has reopened successfully.
+  Future<void> restoreConsistentSnapshot(String snapshotPath) async {
+    final dbPath = join(await getDatabasesPath(), databaseFileName);
+    final staging = File('$dbPath.restore-incoming');
+    final existing = File(dbPath);
+    final rollback = File('$dbPath.before-restore');
+    if (await staging.exists()) await staging.delete();
+    await File(snapshotPath).copy(staging.path);
+    final probe = await openDatabase(
+      staging.path, readOnly: true, singleInstance: false,
+    );
+    try {
+      final checked = await probe.rawQuery('PRAGMA integrity_check');
+      if (checked.isEmpty || checked.first.values.first != 'ok') {
+        throw StateError('Backup failed SQLite integrity verification');
+      }
+      final version = Sqflite.firstIntValue(
+        await probe.rawQuery('PRAGMA user_version'),
+      );
+      if (version == null || version < 1 || version > _schemaVersion) {
+        throw StateError('Backup database schema version is not compatible');
+      }
+      final tables = await probe.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table'",
+      );
+      final names = tables.map((row) => row['name']).toSet();
+      if (!names.contains('sessions') || !names.contains('samples')) {
+        throw StateError('Backup is missing sessions or samples');
+      }
+    } finally {
+      await probe.close();
+    }
+
+    // sqlite closes/checkpoints WAL before swap. The database is unavailable
+    // for a brief moment; do not invoke during an active recording.
+    final active = _db;
+    if (active != null) await active.close();
+    _db = null;
+    _openingDb = null;
+    var movedOriginal = false;
+    try {
+      if (await rollback.exists()) await rollback.delete();
+      if (await existing.exists()) {
+        await existing.rename(rollback.path);
+        movedOriginal = true;
+      }
+      for (final suffix in ['-wal', '-shm']) {
+        final sidecar = File(dbPath + suffix);
+        if (await sidecar.exists()) await sidecar.delete();
+      }
+      await staging.rename(dbPath);
+      await database; // Checks migration/open before considering restore done.
+      if (movedOriginal && await rollback.exists()) await rollback.delete();
+    } catch (_) {
+      if (_db != null) await _db!.close();
+      _db = null;
+      _openingDb = null;
+      if (await existing.exists()) await existing.delete();
+      if (movedOriginal && await rollback.exists()) {
+        await rollback.rename(dbPath);
+      }
+      rethrow;
+    } finally {
+      if (await staging.exists()) await staging.delete();
+    }
   }
 
   /// Per-signal-type counts, so a session with data can be distinguished

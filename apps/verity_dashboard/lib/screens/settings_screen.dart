@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../polar/accesslink_service.dart';
 import '../polar/polar_repository.dart';
+import '../storage/local_backup_service.dart';
+import '../storage/local_db.dart';
 import '../widgets/collapsible_hint.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -20,7 +22,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _recordAccel = true;
   bool _recordGyro = true;
   bool _recordMag = true;
-  bool _recordPpi = true;
+  bool _recordPpi = false;
   bool _scanning = false;
   StreamSubscription? _deviceSub;
   StreamSubscription? _connSub;
@@ -28,6 +30,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   StreamSubscription? _errorSub;
   StreamSubscription? _statusSub;
   String? _statusMessage;
+
+  final _archivePassword = TextEditingController();
+  bool _archiveBusy = false;
+  bool _archiveFolderSelected = false;
+  bool _archiveSecretSet = false;
+  String? _archiveStatus;
 
   final _accessLink = AccessLinkService();
   final _clientIdController = TextEditingController();
@@ -82,6 +90,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() => _statusMessage = message);
     });
     _loadAccessLinkState();
+    _refreshArchiveState();
   }
 
   Future<void> _loadAccessLinkState() async {
@@ -180,7 +189,189 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _clientSecretController.dispose();
     _redirectUriController.dispose();
     _codeController.dispose();
+    _archivePassword.dispose();
     super.dispose();
+  }
+
+
+  Future<void> _refreshArchiveState() async {
+    try {
+      final archive = LocalBackupService.instance;
+      final folder = await archive.hasFolder;
+      final secret = await archive.hasPassword;
+      if (!mounted) return;
+      setState(() {
+        _archiveFolderSelected = folder;
+        _archiveSecretSet = secret;
+      });
+    } catch (e) {
+      if (mounted) setState(() => _archiveStatus = 'Backup status unavailable: $e');
+    }
+  }
+
+  Future<void> _chooseArchiveFolder() async {
+    setState(() => _archiveBusy = true);
+    try {
+      final chosen = await LocalBackupService.instance.chooseFolder();
+      await _refreshArchiveState();
+      if (mounted) {
+        setState(() => _archiveStatus = chosen
+            ? 'Phone folder selected. Set a password and tap Backup now.'
+            : 'Folder selection cancelled.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _archiveStatus = 'Folder selection failed: $e');
+    } finally {
+      if (mounted) setState(() => _archiveBusy = false);
+    }
+  }
+
+  Future<void> _backupNow() async {
+    if (!_archiveFolderSelected) {
+      setState(() => _archiveStatus = 'Choose a phone folder first.');
+      return;
+    }
+    setState(() => _archiveBusy = true);
+    try {
+      if (!_archiveSecretSet) {
+        if (await LocalBackupService.instance.folderContainsBackups) {
+          throw StateError('Existing archives found. RESTORE with your original password first; do not overwrite your recovery copies.');
+        }
+        if (_archivePassword.text.length < 8) {
+          throw StateError('Set a recovery password with 8+ characters.');
+        }
+        await LocalBackupService.instance.savePassword(_archivePassword.text);
+      }
+      final name = await LocalBackupService.instance.backupNow();
+      _archivePassword.clear();
+      await _refreshArchiveState();
+      if (mounted) {
+        setState(() => _archiveStatus =
+            'Saved $name. Automatic backups after recording are enabled.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _archiveStatus = 'Backup FAILED: $e');
+    } finally {
+      if (mounted) setState(() => _archiveBusy = false);
+    }
+  }
+
+  Future<void> _restoreArchive() async {
+    if (context.read<PolarRepository>().isRecordingLocalSession) {
+      setState(() => _archiveStatus = 'Stop recording before restoring data.');
+      return;
+    }
+    if (!_archiveFolderSelected || _archivePassword.text.isEmpty) {
+      setState(() => _archiveStatus =
+          'Select the original backup folder and enter its recovery password.');
+      return;
+    }
+    final existing = await LocalDb.instance.getSessions();
+    if (!mounted) return;
+    final approved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Replace the app database?'),
+        content: Text(
+          'Restore the latest completed encrypted backup from the selected folder. '
+          'This REPLACES ${existing.length} current session(s) in the app. Continue?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Restore')),
+        ],
+      ),
+    );
+    if (approved != true || !mounted) return;
+    setState(() => _archiveBusy = true);
+    try {
+      final name = await LocalBackupService.instance.restoreLatest(_archivePassword.text);
+      _archivePassword.clear();
+      if (!mounted) return;
+      context.read<PolarRepository>().notifySessionsChanged();
+      await _refreshArchiveState();
+      if (mounted) setState(() => _archiveStatus = 'Restored $name. Recordings are available.');
+    } catch (e) {
+      if (mounted) setState(() => _archiveStatus = 'Restore FAILED; data preserved: $e');
+    } finally {
+      if (mounted) setState(() => _archiveBusy = false);
+    }
+  }
+
+  Widget _archiveCard() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Local encrypted backup', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            const Text(
+              'Recordings stay in private SQLite storage. Choose a folder in '
+              'your phone Documents once. After each completed recording, an '
+              'encrypted snapshot goes there; the last two are kept. '
+              'No cloud account or subscription required.',
+            ),
+            const SizedBox(height: 8),
+            Text(_archiveFolderSelected
+                ? 'Phone folder: selected'
+                : 'Phone folder: not selected'),
+            Text(_archiveSecretSet
+                ? 'Recovery password: configured'
+                : 'Recovery password: not configured'),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _archiveBusy ? null : _chooseArchiveFolder,
+              icon: const Icon(Icons.folder_open),
+              label: const Text('Choose phone backup folder'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _archivePassword,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              decoration: InputDecoration(
+                labelText: _archiveSecretSet
+                    ? 'Original password for Restore'
+                    : 'New password / original password for Restore',
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Keep your recovery password safe. After uninstalling, Android '
+              'deletes app storage and its key. Reselect the SAME folder and '
+              'tap Restore before creating a new backup. Without the '
+              'original password, the backup cannot be decrypted.',
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: _archiveBusy ? null : _backupNow,
+                  icon: const Icon(Icons.backup),
+                  label: const Text('Backup now / enable auto'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _archiveBusy ? null : _restoreArchive,
+                  icon: const Icon(Icons.settings_backup_restore),
+                  label: const Text('Restore after reinstall'),
+                ),
+              ],
+            ),
+            if (_archiveBusy)
+              const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
+            if (_archiveStatus != null)
+              Padding(padding: const EdgeInsets.only(top: 12), child: Text(_archiveStatus!)),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -445,6 +636,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 16),
+          _archiveCard(),
+          const SizedBox(height: 16),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -459,7 +652,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         'to GitHub and they do not sync to Polar Flow. Heart-rate and PPG are '
                         'health data — do not put them in a public repository.\n\n'
                         'Delete one session from its detail screen (trash icon), or remove every '
-                        'recording below. Uninstalling the app also deletes the database.',
+                        'recording below. Uninstalling removes the primary database, but a '
+                        'completed encrypted local archive can be restored.',
                   ),
                   const SizedBox(height: 12),
                   OutlinedButton.icon(

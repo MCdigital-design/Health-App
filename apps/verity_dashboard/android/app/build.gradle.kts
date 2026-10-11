@@ -35,7 +35,13 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+            // CI's headless Android emulator is x86_64; production APKs
+            // retain the original ARM-only ABI/signature and update path.
+            abiFilters += if (project.findProperty("ciEmulator") == "true") {
+                listOf("x86_64")
+            } else {
+                listOf("armeabi-v7a", "arm64-v8a")
+            }
         }
     }
 
