@@ -315,9 +315,9 @@ void main() {
 
     test('snapshot restores mixed sensor data after simulated reinstall', () async {
       final db = LocalDb.instance;
-      final id = 'test-backup-' + _uuid.v4();
+      final id = 'test-backup-${_uuid.v4()}';
       final temp = await Directory.systemTemp.createTemp('verity-backup-test-');
-      final snapshotPath = temp.path + '/archive.db';
+      final snapshotPath = '${temp.path}/archive.db';
       try {
         await db.insertSession(RecordingSession(
           id: id, deviceId: 'sensor-A', name: 'Retained', startTimeMs: 1000,
@@ -347,14 +347,14 @@ void main() {
 
     test('invalid restore never replaces existing sessions', () async {
       final db = LocalDb.instance;
-      final id = 'test-invalid-restore-' + _uuid.v4();
+      final id = 'test-invalid-restore-${_uuid.v4()}';
       final temp = await Directory.systemTemp.createTemp('verity-bad-');
       try {
         await db.insertSession(RecordingSession(
           id: id, deviceId: 'sensor-A', name: 'MustKeep', startTimeMs: 1000,
           dataTypes: 'hr',
         ));
-        final broken = File(temp.path + '/broken.db');
+        final broken = File('${temp.path}/broken.db');
         await broken.writeAsString('not a SQLite backup');
         await expectLater(
           db.restoreConsistentSnapshot(broken.path),
