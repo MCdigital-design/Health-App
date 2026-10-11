@@ -214,9 +214,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final chosen = await LocalBackupService.instance.chooseFolder();
       await _refreshArchiveState();
-      if (mounted) setState(() => _archiveStatus = chosen
-          ? 'Phone folder selected. Set a password and tap Backup now.'
-          : 'Folder selection cancelled.');
+      if (mounted) {
+        setState(() => _archiveStatus = chosen
+            ? 'Phone folder selected. Set a password and tap Backup now.'
+            : 'Folder selection cancelled.');
+      }
     } catch (e) {
       if (mounted) setState(() => _archiveStatus = 'Folder selection failed: $e');
     } finally {
@@ -243,8 +245,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final name = await LocalBackupService.instance.backupNow();
       _archivePassword.clear();
       await _refreshArchiveState();
-      if (mounted) setState(() => _archiveStatus =
-          'Saved $name. Automatic backups after recording are enabled.');
+      if (mounted) {
+        setState(() => _archiveStatus =
+            'Saved $name. Automatic backups after recording are enabled.');
+      }
     } catch (e) {
       if (mounted) setState(() => _archiveStatus = 'Backup FAILED: $e');
     } finally {
