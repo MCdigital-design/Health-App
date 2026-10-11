@@ -232,6 +232,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _archiveBusy = true);
     try {
       if (!_archiveSecretSet) {
+        if (await LocalBackupService.instance.folderContainsBackups) {
+          throw StateError('Existing archives found. RESTORE with your original password first; do not overwrite your recovery copies.');
+        }
         if (_archivePassword.text.length < 8) {
           throw StateError('Set a recovery password with 8+ characters.');
         }
